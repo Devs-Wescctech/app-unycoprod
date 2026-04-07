@@ -1,0 +1,730 @@
+{
+  "enabled": true,
+  "interval": 3600000,
+  "lastSync": "2026-04-07T00:22:34.400Z",
+  "logs": [
+    {
+      "id": "1775155025293_13",
+      "timestamp": "2026-04-02T18:37:05.293Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775155025306_14",
+      "timestamp": "2026-04-02T18:37:05.306Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775155025393_15",
+      "timestamp": "2026-04-02T18:37:05.393Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775155025393_16",
+      "timestamp": "2026-04-02T18:37:05.393Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775158627953_17",
+      "timestamp": "2026-04-02T19:37:07.953Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775158627964_18",
+      "timestamp": "2026-04-02T19:37:07.964Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775158628031_19",
+      "timestamp": "2026-04-02T19:37:08.031Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775158628032_20",
+      "timestamp": "2026-04-02T19:37:08.032Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775162230602_21",
+      "timestamp": "2026-04-02T20:37:10.602Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775162230614_22",
+      "timestamp": "2026-04-02T20:37:10.614Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775162230706_23",
+      "timestamp": "2026-04-02T20:37:10.706Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775162230707_24",
+      "timestamp": "2026-04-02T20:37:10.707Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775165833350_25",
+      "timestamp": "2026-04-02T21:37:13.350Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775165833361_26",
+      "timestamp": "2026-04-02T21:37:13.361Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775165833432_27",
+      "timestamp": "2026-04-02T21:37:13.432Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775165833433_28",
+      "timestamp": "2026-04-02T21:37:13.433Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775169436152_29",
+      "timestamp": "2026-04-02T22:37:16.152Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775169436164_30",
+      "timestamp": "2026-04-02T22:37:16.164Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775169436164_31",
+      "timestamp": "2026-04-02T22:37:16.164Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775169436165_32",
+      "timestamp": "2026-04-02T22:37:16.165Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775173038996_33",
+      "timestamp": "2026-04-02T23:37:18.996Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775173039007_34",
+      "timestamp": "2026-04-02T23:37:19.007Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775173039070_35",
+      "timestamp": "2026-04-02T23:37:19.070Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775173039070_36",
+      "timestamp": "2026-04-02T23:37:19.070Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775176641855_37",
+      "timestamp": "2026-04-03T00:37:21.855Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775176641867_38",
+      "timestamp": "2026-04-03T00:37:21.867Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775176641868_39",
+      "timestamp": "2026-04-03T00:37:21.868Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775176641868_40",
+      "timestamp": "2026-04-03T00:37:21.868Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775180244643_41",
+      "timestamp": "2026-04-03T01:37:24.643Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775180244656_42",
+      "timestamp": "2026-04-03T01:37:24.656Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775180244760_43",
+      "timestamp": "2026-04-03T01:37:24.760Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775180244760_44",
+      "timestamp": "2026-04-03T01:37:24.760Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775183847343_45",
+      "timestamp": "2026-04-03T02:37:27.343Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775183847355_46",
+      "timestamp": "2026-04-03T02:37:27.355Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775183847355_47",
+      "timestamp": "2026-04-03T02:37:27.355Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775183847356_48",
+      "timestamp": "2026-04-03T02:37:27.356Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775187450041_49",
+      "timestamp": "2026-04-03T03:37:30.041Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775187450054_50",
+      "timestamp": "2026-04-03T03:37:30.054Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775187450127_51",
+      "timestamp": "2026-04-03T03:37:30.127Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775187450128_52",
+      "timestamp": "2026-04-03T03:37:30.128Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775191052778_53",
+      "timestamp": "2026-04-03T04:37:32.778Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775191052790_54",
+      "timestamp": "2026-04-03T04:37:32.790Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775191052900_55",
+      "timestamp": "2026-04-03T04:37:32.900Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775191052900_56",
+      "timestamp": "2026-04-03T04:37:32.900Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775194655570_57",
+      "timestamp": "2026-04-03T05:37:35.570Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775194655677_58",
+      "timestamp": "2026-04-03T05:37:35.677Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775194655850_59",
+      "timestamp": "2026-04-03T05:37:35.850Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775194655850_60",
+      "timestamp": "2026-04-03T05:37:35.850Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775198258274_61",
+      "timestamp": "2026-04-03T06:37:38.274Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775198258286_62",
+      "timestamp": "2026-04-03T06:37:38.286Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775198258344_63",
+      "timestamp": "2026-04-03T06:37:38.344Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775198258344_64",
+      "timestamp": "2026-04-03T06:37:38.344Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775201861147_65",
+      "timestamp": "2026-04-03T07:37:41.147Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775201861160_66",
+      "timestamp": "2026-04-03T07:37:41.160Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775201861242_67",
+      "timestamp": "2026-04-03T07:37:41.242Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775201861243_68",
+      "timestamp": "2026-04-03T07:37:41.243Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775205464051_69",
+      "timestamp": "2026-04-03T08:37:44.051Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775205464063_70",
+      "timestamp": "2026-04-03T08:37:44.063Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775205464143_71",
+      "timestamp": "2026-04-03T08:37:44.143Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775205464143_72",
+      "timestamp": "2026-04-03T08:37:44.143Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775209066921_73",
+      "timestamp": "2026-04-03T09:37:46.921Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775209066935_74",
+      "timestamp": "2026-04-03T09:37:46.935Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775209067037_75",
+      "timestamp": "2026-04-03T09:37:47.037Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775209067038_76",
+      "timestamp": "2026-04-03T09:37:47.038Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775212669791_77",
+      "timestamp": "2026-04-03T10:37:49.791Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775212669803_78",
+      "timestamp": "2026-04-03T10:37:49.803Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775212669931_79",
+      "timestamp": "2026-04-03T10:37:49.931Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775212669932_80",
+      "timestamp": "2026-04-03T10:37:49.932Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775216272640_81",
+      "timestamp": "2026-04-03T11:37:52.640Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775216272653_82",
+      "timestamp": "2026-04-03T11:37:52.653Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775216272774_83",
+      "timestamp": "2026-04-03T11:37:52.774Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775216272775_84",
+      "timestamp": "2026-04-03T11:37:52.775Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775219875400_85",
+      "timestamp": "2026-04-03T12:37:55.400Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775219875411_86",
+      "timestamp": "2026-04-03T12:37:55.411Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775219875471_87",
+      "timestamp": "2026-04-03T12:37:55.471Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775219875472_88",
+      "timestamp": "2026-04-03T12:37:55.472Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775223478177_89",
+      "timestamp": "2026-04-03T13:37:58.177Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775223478288_90",
+      "timestamp": "2026-04-03T13:37:58.288Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775223478378_91",
+      "timestamp": "2026-04-03T13:37:58.378Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775223478379_92",
+      "timestamp": "2026-04-03T13:37:58.379Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775227081004_93",
+      "timestamp": "2026-04-03T14:38:01.004Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775227081016_94",
+      "timestamp": "2026-04-03T14:38:01.016Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775227081078_95",
+      "timestamp": "2026-04-03T14:38:01.078Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775227081078_96",
+      "timestamp": "2026-04-03T14:38:01.078Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775230683885_97",
+      "timestamp": "2026-04-03T15:38:03.885Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775230683898_98",
+      "timestamp": "2026-04-03T15:38:03.898Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775230683984_99",
+      "timestamp": "2026-04-03T15:38:03.984Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775230683985_100",
+      "timestamp": "2026-04-03T15:38:03.985Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775232424326_0",
+      "timestamp": "2026-04-03T16:07:04.326Z",
+      "type": "info",
+      "message": "Serviço de sincronização iniciado automaticamente",
+      "details": null
+    },
+    {
+      "id": "1775510426114_0",
+      "timestamp": "2026-04-06T21:20:26.114Z",
+      "type": "info",
+      "message": "Serviço de sincronização iniciado automaticamente",
+      "details": null
+    },
+    {
+      "id": "1775514028896_1",
+      "timestamp": "2026-04-06T22:20:28.896Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775514028912_2",
+      "timestamp": "2026-04-06T22:20:28.912Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775514029096_3",
+      "timestamp": "2026-04-06T22:20:29.096Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775514029096_4",
+      "timestamp": "2026-04-06T22:20:29.096Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    },
+    {
+      "id": "1775517531224_0",
+      "timestamp": "2026-04-06T23:18:51.224Z",
+      "type": "info",
+      "message": "Serviço de sincronização iniciado automaticamente",
+      "details": null
+    },
+    {
+      "id": "1775517751557_0",
+      "timestamp": "2026-04-06T23:22:31.557Z",
+      "type": "info",
+      "message": "Serviço de sincronização iniciado automaticamente",
+      "details": null
+    },
+    {
+      "id": "1775521354383_1",
+      "timestamp": "2026-04-07T00:22:34.383Z",
+      "type": "info",
+      "message": "Iniciando ciclo de sincronização automática",
+      "details": null
+    },
+    {
+      "id": "1775521354396_2",
+      "timestamp": "2026-04-07T00:22:34.396Z",
+      "type": "info",
+      "message": "Encontrados 3 usuários com CPF cadastrado",
+      "details": null
+    },
+    {
+      "id": "1775521354398_3",
+      "timestamp": "2026-04-07T00:22:34.398Z",
+      "type": "info",
+      "message": "Status atual: 0 sincronizados, 1 já existem, 2 com erro, 0 pendentes",
+      "details": null
+    },
+    {
+      "id": "1775521354399_4",
+      "timestamp": "2026-04-07T00:22:34.399Z",
+      "type": "success",
+      "message": "Nenhum usuário novo para sincronizar",
+      "details": null
+    }
+  ],
+  "syncedUsers": {},
+  "existingUsers": {
+    "3": {
+      "syncedAt": "2026-03-31T21:12:50.159Z",
+      "name": "valquir Lopes"
+    }
+  },
+  "errorUsers": {
+    "2": {
+      "errorAt": "2026-03-31T21:12:48.452Z",
+      "name": "Cristian Gomes Dias",
+      "error": "CPF inválido (10 dígitos, esperado 11)",
+      "cpf": "1111111111",
+      "permanent": true
+    },
+    "4": {
+      "errorAt": "2026-03-31T21:12:50.159Z",
+      "name": "Cristian Gomes",
+      "error": "CPF inválido (dígito verificador incorreto)",
+      "cpf": "87888888892",
+      "permanent": true
+    }
+  }
+}
