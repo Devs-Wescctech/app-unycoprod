@@ -1,0 +1,27 @@
+services:
+  app-unycoprod:
+    image: ghcr.io/devs-wescctech/app-unycoprod:latest
+    container_name: app-unycoprod
+    restart: unless-stopped
+    ports:
+      - "5100:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - DATABASE_URL=postgresql://auth_bd:4uth%401307BD@172.17.0.1:5432/unycoprod
+      - TOTVS_API_TOKEN=dW5pY28uaW50ZWdyYToxbmljQCM=
+      - VINDI_API_KEY=SUA_CHAVE_VINDI_AQUI
+    volumes:
+      - /var/www/html/app-unycoprod/data:/app/server
+    networks:
+      - unycoprod-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  unycoprod-network:
+    driver: bridge

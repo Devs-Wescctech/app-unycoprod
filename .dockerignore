@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.gitignore
+.replit
+.canvas
+.local
+attached_assets
+*.md
+*.log
+.env
+.env.*
+.vite

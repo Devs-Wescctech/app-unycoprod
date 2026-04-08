@@ -12,6 +12,22 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.get('/', (req, res, next) => {
+  const cookies = req.headers.cookie || '';
+  const hasLpToken = cookies.split(';').some(c => c.trim().startsWith('lp_token='));
+  if (!hasLpToken) {
+    return res.sendFile(path.join(__dirname, '../public/lp/index.html'));
+  }
+  next();
+});
+app.get('/home', (req, res) => {
+  const cookies = req.headers.cookie || '';
+  const hasLpToken = cookies.split(';').some(c => c.trim().startsWith('lp_token='));
+  if (!hasLpToken) {
+    return res.redirect(302, '/');
+  }
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
 app.get('/lp/home', (req, res) => res.redirect(302, '/'));
 app.get('/lp/home/', (req, res) => res.redirect(302, '/'));
 app.use('/lp', express.static(path.join(__dirname, '../public/lp')));
@@ -3462,7 +3478,16 @@ async function initializeDatabase() {
   }
 }
 
-const PORT = isProduction ? 5000 : (process.env.TOTVS_PROXY_PORT || 3001);
+app.get('/api/health', async (req, res) => {
+  try {
+    await query('SELECT 1');
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(503).json({ status: 'error', message: err.message });
+  }
+});
+
+const PORT = process.env.PORT || (isProduction ? 5000 : (process.env.TOTVS_PROXY_PORT || 3001));
 
 (async () => {
   await initializeDatabase();
