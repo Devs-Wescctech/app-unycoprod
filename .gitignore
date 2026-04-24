@@ -8,3 +8,17 @@ npm-debug.log*
 .DS_Store
 *.local
 .vite/
+
+# Replit local files
+.canvas/
+.local/
+.replit
+attached_assets/
+.config/
+.cache/
+.upm/
+
+# Runtime / sensitive
+server/api-config.json
+server/sync-data.json
+server/data/
