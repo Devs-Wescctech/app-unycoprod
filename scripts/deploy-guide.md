@@ -6,7 +6,7 @@
 sudo -u postgres psql
 
 CREATE DATABASE unycoprod;
-CREATE USER auth_bd WITH PASSWORD '4uth@1307BD';
+CREATE USER auth_bd WITH PASSWORD '<DB_PASSWORD>';
 GRANT ALL PRIVILEGES ON DATABASE unycoprod TO auth_bd;
 \c unycoprod
 GRANT ALL ON SCHEMA public TO auth_bd;
@@ -47,37 +47,19 @@ sudo git clone https://github.com/Devs-Wescctech/app-unycoprod.git .
 
 ## 5. Configurar o docker-compose.yml
 
-Editar `/var/www/html/app-unycoprod/docker-compose.yml`:
+O `docker-compose.yml` do repositório já está pronto e não contém credenciais.
 
-```yaml
-services:
-  app-unycoprod:
-    image: ghcr.io/devs-wescctech/app-unycoprod:latest
-    container_name: app-unycoprod
-    restart: unless-stopped
-    ports:
-      - "5100:5000"
-    environment:
-      - NODE_ENV=production
-      - PORT=5000
-      - DATABASE_URL=postgresql://auth_bd:4uth%401307BD@172.17.0.1:5432/unycoprod
-      - DB_SSL=false
-      - TOTVS_API_TOKEN=dW5pY28uaW50ZWdyYToxbmljQCM=
-      - VINDI_API_KEY=<CHAVE_VINDI_PRODUCAO>
-    volumes:
-      - /var/www/html/app-unycoprod/data:/app/server/data
-    networks:
-      - unycoprod-network
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+Os secrets ficam em um arquivo `.env` ao lado do compose (NÃO commitado). Crie em `/var/www/html/app-unycoprod/.env`:
 
-networks:
-  unycoprod-network:
-    driver: bridge
+```bash
+DATABASE_URL=postgresql://auth_bd:<DB_PASSWORD_URLENCODED>@172.17.0.1:5432/unycoprod
+TOTVS_API_TOKEN=<TOTVS_API_TOKEN_BASE64>
+VINDI_API_KEY=<VINDI_API_KEY>
+```
+
+Permissões restritas:
+```bash
+chmod 600 /var/www/html/app-unycoprod/.env
 ```
 
 **Portas em uso no servidor:**
