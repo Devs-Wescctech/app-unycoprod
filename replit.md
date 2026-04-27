@@ -49,7 +49,7 @@ Eu prefiro um estilo de comunicação direta e concisa. Gosto de desenvolvimento
 ### Central de APIs
 - **Página:** `src/pages/CentralAPIs.jsx` para monitoramento completo de APIs externas (TOTVS, Coobmais, Vindi, WhatsApp, ViaCEP).
 - **Funcionalidades:** Cards de status por API (online, offline, latência), lista de endpoints, teste individual, auto-refresh, edição de tokens/URLs.
-- **Configs Dinâmicas:** Tokens e URLs de todas as APIs são configuráveis via Central de APIs e aplicados em tempo real (sem restart). Persistidos em `server/api-config.json` (TOTVS, Coobmais, Vindi) e `system_config` DB (WhatsApp). Health check usa configs dinâmicas. Validação HTTPS obrigatória, allowlist de APIs, tokens mascarados no response.
+- **Configs Dinâmicas:** Tokens e URLs de todas as APIs são configuráveis via Central de APIs e aplicados em tempo real (sem restart). Persistidos em `server/api-config.json` (TOTVS, Coobmais, Vindi) e `system_config` DB (WhatsApp). Health check usa configs dinâmicas. Validação HTTPS obrigatória, allowlist de APIs, tokens/credenciais mascarados no response. **Coobmais:** UI gerencia AccessKey + password + URL de auth; token JWT exibido em box read-only com botão "Regenerar" e contagem de expiração.
 
 ### Módulo Landing Pages (LP)
 - **Componentes React LP:** `LPHome`, `LPHeader`, `LPFooter`, `SearchForm`, `HotelCard`, `HotelDetailModal`, `BookingFlow`, `PaymentFlow`, `MyBookings`.
@@ -72,7 +72,7 @@ Sistema de tradução automática de erros técnicos para mensagens amigáveis e
 - **PostgreSQL:** Banco de dados relacional.
 - **TOTVS API:** Sistema ERP para sincronização de dados de clientes.
 - **ViaCEP API:** Para autopreenchimento de endereços.
-- **Coobmais API:** Para busca de hotéis, reservas, pagamentos e dados de associados. Utiliza autenticação Bearer token.
+- **Coobmais API:** Para busca de hotéis, reservas, pagamentos e dados de associados. Auto-login via `AccessKey + password` no endpoint `https://apiprod.coobmais.com.br/auth/api/Users/Authenticate` — JWT gerado/cacheado pelo backend (`ensureCoobToken()` em `server/index.js`) com refresh automático 5min antes do `exp`. Configs (`COOBMAIS_AUTH_URL`, `COOBMAIS_ACCESS_KEY`, `COOBMAIS_PASSWORD`) editáveis via Central de APIs ou env. Endpoints de gerenciamento: `GET /api/central/coobmais/token` (preview+exp), `POST /api/central/coobmais/refresh-token` (força regeneração).
 - **Vindi API:** Para processamento de pagamentos (cartão de crédito e boleto).
 - **WESCCTECH API:** Para automação e envio de mensagens WhatsApp.
 - **Bibliotecas Frontend:** `xlsx` (SheetJS), `jspdf`, `html2canvas` para exportação de dados. Bootstrap 5.3.6, FontAwesome 5.12, Flatpickr para as Landing Pages.
@@ -92,7 +92,7 @@ Sistema de tradução automática de erros técnicos para mensagens amigáveis e
 
 ### Variáveis de Ambiente (Produção)
 - `NODE_ENV=production`, `PORT=5000` — definidos inline no `docker-compose.yml`.
-- Demais secrets ficam em `/var/www/html/app-unycoprod/.env` (NÃO commitado, `chmod 600`), carregado via `env_file:` no compose. Veja `.env.example` para a lista completa: `DATABASE_URL`, `DB_SSL`, `TOTVS_API_TOKEN`, `VINDI_API_KEY`, `WHATSAPP_API_URL`, `WHATSAPP_API_TOKEN`.
+- Demais secrets ficam em `/var/www/html/app-unycoprod/.env` (NÃO commitado, `chmod 600`), carregado via `env_file:` no compose. Veja `.env.example` para a lista completa: `DATABASE_URL`, `DB_SSL`, `TOTVS_API_TOKEN`, `VINDI_API_KEY`, `WHATSAPP_API_URL`, `WHATSAPP_API_TOKEN`, `COOBMAIS_BASE_URL`, `COOBMAIS_AUTH_URL`, `COOBMAIS_ACCESS_KEY`, `COOBMAIS_PASSWORD`.
 
 ### Endpoints Health
 - `GET /api/health` — retorna `{ status: "ok", timestamp }` ou 503 se DB offline.

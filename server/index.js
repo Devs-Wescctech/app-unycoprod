@@ -1477,8 +1477,10 @@ app.get('/api/central/apis', async (req, res) => {
       name: 'Coobmais',
       description: 'Plataforma de reservas - Hotéis, disponibilidade e confirmação',
       baseUrl: COOBMAIS_BASE_URL,
-      authType: 'Bearer Token (JWT)',
+      authUrl: COOBMAIS_AUTH_URL,
+      authType: 'AccessKey + Password (JWT auto-gerado)',
       hasToken: !!COOBMAIS_TOKEN,
+      hasCredentials: !!(COOBMAIS_ACCESS_KEY && COOBMAIS_PASSWORD),
       category: 'Reservas',
       endpoints: [
         { method: 'POST', path: '/Book/GetCities', description: 'Buscar cidades' },
@@ -1535,15 +1537,58 @@ app.get('/api/central/apis', async (req, res) => {
 });
 
 app.get('/api/central/config', (req, res) => {
+  const mask = (v) => {
+    const s = String(v || '');
+    return s.length > 8 ? '••••' + s.slice(-4) : '••••';
+  };
   const safeConfig = {};
   for (const [key, val] of Object.entries(apiConfigOverrides)) {
     safeConfig[key] = { ...val };
-    if (safeConfig[key].token) {
-      const t = safeConfig[key].token;
-      safeConfig[key].token = t.length > 8 ? '••••' + t.slice(-4) : '••••';
-    }
+    if (safeConfig[key].token) safeConfig[key].token = mask(safeConfig[key].token);
+    if (safeConfig[key].accessKey) safeConfig[key].accessKey = mask(safeConfig[key].accessKey);
+    if (safeConfig[key].password) safeConfig[key].password = mask(safeConfig[key].password);
   }
   res.json({ success: true, config: safeConfig });
+});
+
+app.get('/api/central/coobmais/token', async (req, res) => {
+  try {
+    const token = await ensureCoobToken();
+    const tokenPreview = token && token.length > 24 ? token.slice(0, 18) + '...' + token.slice(-12) : token;
+    res.json({
+      success: true,
+      tokenPreview,
+      tokenFull: token,
+      exp: coobmaisTokenExp,
+      expiresAt: coobmaisTokenExp ? new Date(coobmaisTokenExp).toISOString() : null,
+      expiresInSeconds: coobmaisTokenExp ? Math.max(0, Math.floor((coobmaisTokenExp - Date.now()) / 1000)) : null,
+      hasCredentials: !!(COOBMAIS_ACCESS_KEY && COOBMAIS_PASSWORD),
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.post('/api/central/coobmais/refresh-token', async (req, res) => {
+  try {
+    if (!COOBMAIS_ACCESS_KEY || !COOBMAIS_PASSWORD) {
+      return res.status(400).json({ success: false, error: 'AccessKey e password não configurados' });
+    }
+    COOBMAIS_TOKEN = '';
+    coobmaisTokenExp = 0;
+    if (apiConfigOverrides.Coobmais) delete apiConfigOverrides.Coobmais.token;
+    const token = await ensureCoobToken();
+    const tokenPreview = token && token.length > 24 ? token.slice(0, 18) + '...' + token.slice(-12) : token;
+    res.json({
+      success: true,
+      tokenPreview,
+      tokenFull: token,
+      exp: coobmaisTokenExp,
+      expiresAt: new Date(coobmaisTokenExp).toISOString(),
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 app.put('/api/central/apis/:name', async (req, res) => {
@@ -1570,6 +1615,39 @@ app.put('/api/central/apis/:name', async (req, res) => {
     if (!apiConfigOverrides[name]) apiConfigOverrides[name] = {};
     if (baseUrl !== undefined) apiConfigOverrides[name].baseUrl = baseUrl;
     if (token !== undefined) apiConfigOverrides[name].token = token;
+
+    if (name === 'Coobmais') {
+      const { accessKey, password: coobPwd, authUrl } = req.body;
+      let credsChanged = false;
+      if (accessKey !== undefined && accessKey !== '') {
+        apiConfigOverrides[name].accessKey = accessKey;
+        COOBMAIS_ACCESS_KEY = accessKey;
+        credsChanged = true;
+      }
+      if (coobPwd !== undefined && coobPwd !== '') {
+        apiConfigOverrides[name].password = coobPwd;
+        COOBMAIS_PASSWORD = coobPwd;
+        credsChanged = true;
+      }
+      if (authUrl !== undefined && authUrl !== '') {
+        try {
+          const parsed = new URL(authUrl);
+          if (parsed.protocol !== 'https:') {
+            return res.status(400).json({ success: false, error: 'URL de autenticação deve usar HTTPS' });
+          }
+        } catch (_) {
+          return res.status(400).json({ success: false, error: 'URL de autenticação inválida' });
+        }
+        apiConfigOverrides[name].authUrl = authUrl;
+        COOBMAIS_AUTH_URL = authUrl;
+        credsChanged = true;
+      }
+      if (credsChanged) {
+        COOBMAIS_TOKEN = '';
+        coobmaisTokenExp = 0;
+        delete apiConfigOverrides[name].token;
+      }
+    }
 
     if (username && password && name === 'TOTVS') {
       const basicToken = Buffer.from(`${username}:${password}`).toString('base64');
@@ -1683,20 +1761,81 @@ function parseLpToken(req) {
   return match ? match[1] : null;
 }
 
-let COOBMAIS_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiJkcGNON3h4dXpUenlMT3dIMURoWFhVVEFDSHJZUDNQZjJXblgxanhPZDlrQXhrZUtOYyIsInJvbGUiOiJVc2VyIiwic2Vzc2lvblR5cGUiOiJVbmljbyIsImVudmlyb21lbnQiOiJEZXZlbG9wbWVudCIsIm5iZiI6MTc3MjY2NTY1OCwiZXhwIjoxNzc1NDAxNjU4LCJpYXQiOjE3NzI2NjU2NTgsImlzcyI6ImFwaXN0Zy5jb29ibWFpcyIsImF1ZCI6ImFwaXN0Zy5jb29ibWFpcyJ9.pRItNQs9xKIY6tuNhQnN0rJoCdNj3JAwKxIagmKNwsw';
-let COOBMAIS_BASE_URL = 'https://apistg.coobmais.com.br/unico/api';
-if (apiConfigOverrides.Coobmais?.token) COOBMAIS_TOKEN = apiConfigOverrides.Coobmais.token;
+let COOBMAIS_TOKEN = process.env.COOBMAIS_TOKEN || '';
+let COOBMAIS_BASE_URL = process.env.COOBMAIS_BASE_URL || 'https://apiprod.coobmais.com.br/unico/api';
+let COOBMAIS_AUTH_URL = process.env.COOBMAIS_AUTH_URL || 'https://apiprod.coobmais.com.br/auth/api/Users/Authenticate';
+let COOBMAIS_ACCESS_KEY = process.env.COOBMAIS_ACCESS_KEY || '';
+let COOBMAIS_PASSWORD = process.env.COOBMAIS_PASSWORD || '';
+let coobmaisTokenExp = 0;
+let coobmaisAuthInflight = null;
+
 if (apiConfigOverrides.Coobmais?.baseUrl) COOBMAIS_BASE_URL = apiConfigOverrides.Coobmais.baseUrl.replace(/\/+$/, '');
+if (apiConfigOverrides.Coobmais?.authUrl) COOBMAIS_AUTH_URL = apiConfigOverrides.Coobmais.authUrl;
+if (apiConfigOverrides.Coobmais?.accessKey) COOBMAIS_ACCESS_KEY = apiConfigOverrides.Coobmais.accessKey;
+if (apiConfigOverrides.Coobmais?.password) COOBMAIS_PASSWORD = apiConfigOverrides.Coobmais.password;
+if (apiConfigOverrides.Coobmais?.token) {
+  COOBMAIS_TOKEN = apiConfigOverrides.Coobmais.token;
+  try {
+    const payload = JSON.parse(Buffer.from(COOBMAIS_TOKEN.split('.')[1] + '==', 'base64').toString());
+    coobmaisTokenExp = (payload.exp || 0) * 1000;
+  } catch (_) {}
+}
+
+async function ensureCoobToken() {
+  if (COOBMAIS_TOKEN && coobmaisTokenExp > Date.now() + 5 * 60 * 1000) {
+    return COOBMAIS_TOKEN;
+  }
+  if (!COOBMAIS_ACCESS_KEY || !COOBMAIS_PASSWORD) {
+    if (COOBMAIS_TOKEN) return COOBMAIS_TOKEN;
+    throw new Error('Coobmais não configurada: defina AccessKey e password na Central de APIs');
+  }
+  if (coobmaisAuthInflight) return coobmaisAuthInflight;
+  coobmaisAuthInflight = (async () => {
+    try {
+      const resp = await fetch(COOBMAIS_AUTH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ AccessKey: COOBMAIS_ACCESS_KEY, password: COOBMAIS_PASSWORD }),
+      });
+      if (!resp.ok) {
+        const errBody = await resp.text().catch(() => '');
+        throw new Error(`Login Coobmais falhou (HTTP ${resp.status}): ${errBody.slice(0, 200)}`);
+      }
+      const data = await resp.json();
+      const newToken = data?.token;
+      if (!newToken) throw new Error('Resposta de login Coobmais sem campo token');
+      COOBMAIS_TOKEN = newToken;
+      try {
+        const payload = JSON.parse(Buffer.from(newToken.split('.')[1] + '==', 'base64').toString());
+        coobmaisTokenExp = (payload.exp || 0) * 1000;
+      } catch (_) {
+        coobmaisTokenExp = Date.now() + 30 * 60 * 1000;
+      }
+      if (!apiConfigOverrides.Coobmais) apiConfigOverrides.Coobmais = {};
+      apiConfigOverrides.Coobmais.token = newToken;
+      try { fs.writeFileSync(API_CONFIG_FILE, JSON.stringify(apiConfigOverrides, null, 2)); } catch (_) {}
+      console.log('[Coobmais] Token renovado, expira em', new Date(coobmaisTokenExp).toISOString());
+      return newToken;
+    } finally {
+      coobmaisAuthInflight = null;
+    }
+  })();
+  return coobmaisAuthInflight;
+}
 
 app.post('/api/lp/register', async (req, res) => {
   try {
-    const { name, cpf, phone, email, password } = req.body;
+    const { name, cpf, phone, email, password, cep, address, number, bairro, cidade, estado, birth_date } = req.body;
 
     if (!name || !cpf || !email || !password) {
       return res.status(400).json({ success: false, error: 'Campos obrigatórios: name, cpf, email, password' });
     }
 
     const cleanCpf = (cpf || '').replace(/\D/g, '');
+
+    if (!isValidCPF(cleanCpf)) {
+      return res.status(400).json({ success: false, error: 'CPF inválido. Verifique e tente novamente.' });
+    }
 
     const existingCpf = await query(
       "SELECT id FROM users WHERE REPLACE(REPLACE(REPLACE(cpf, '.', ''), '-', ''), '/', '') = $1",
@@ -1711,16 +1850,54 @@ app.post('/api/lp/register', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Já existe um cadastro com este E-mail' });
     }
 
+    const configResult = await query("SELECT value FROM system_config WHERE key = 'plans_enabled'");
+    const plansOn = configResult.rows.length > 0 ? configResult.rows[0].value : true;
+
+    if (!plansOn) {
+      const missing = [];
+      if (!cep) missing.push('CEP');
+      if (!address) missing.push('Endereço');
+      if (!bairro) missing.push('Bairro');
+      if (!cidade) missing.push('Cidade');
+      if (!estado) missing.push('Estado');
+      if (!birth_date) missing.push('Data de nascimento');
+      if (missing.length > 0) {
+        return res.status(400).json({ success: false, error: `Campos obrigatórios: ${missing.join(', ')}` });
+      }
+    }
+
     const result = await query(
-      'INSERT INTO users (name, cpf, phone, email, password, created_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id',
-      [name.trim(), cleanCpf, phone || null, email, password]
+      `INSERT INTO users (name, cpf, phone, email, password, cep, address, numero, bairro, cidade, estado, birth_date, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()) RETURNING id`,
+      [
+        name.trim(),
+        cleanCpf,
+        phone || null,
+        email,
+        password,
+        cep || null,
+        address || null,
+        number || null,
+        bairro || null,
+        cidade || null,
+        estado || null,
+        birth_date || null,
+      ]
     );
 
     const userId = result.rows[0].id;
     const token = createLpSession(userId, name.trim());
 
-    const configResult = await query("SELECT value FROM system_config WHERE key = 'plans_enabled'");
-    const plansOn = configResult.rows.length > 0 ? configResult.rows[0].value : true;
+    if (!plansOn) {
+      try {
+        if (phone) {
+          triggerWhatsAppFlow('registration_completed', {
+            nome: name.trim(),
+          }, phone).catch(() => {});
+        }
+      } catch (e) {}
+    }
+
     const redirect = plansOn ? '/lp/checkout.html' : '/';
 
     res.cookie('lp_token', token, { httpOnly: true, path: '/', sameSite: 'lax', maxAge: 86400000 });
@@ -1868,7 +2045,7 @@ app.post('/api/lp/cities', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${COOBMAIS_TOKEN}`
+        'Authorization': `Bearer ${await ensureCoobToken()}`
       },
       body: JSON.stringify(payload)
     });
@@ -1896,7 +2073,7 @@ async function getHotelCategory(hotelId) {
   try {
     const response = await fetch(`${COOBMAIS_BASE_URL}/Book/InfoHotels?hotel_id=${encodeURIComponent(hotelId)}`, {
       method: 'GET',
-      headers: { 'Authorization': `Bearer ${COOBMAIS_TOKEN}` }
+      headers: { 'Authorization': `Bearer ${await ensureCoobToken()}` }
     });
     if (response.status !== 200) return null;
     const hotel = await response.json();
@@ -1932,7 +2109,7 @@ app.post('/api/lp/hotels', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${COOBMAIS_TOKEN}`
+        'Authorization': `Bearer ${await ensureCoobToken()}`
       },
       body: JSON.stringify(payload)
     });
@@ -2015,7 +2192,7 @@ app.get('/api/lp/hotel-info', async (req, res) => {
     const response = await fetch(`${COOBMAIS_BASE_URL}/Book/InfoHotels?hotel_id=${encodeURIComponent(hotelId)}`, {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${COOBMAIS_TOKEN}`
+        'Authorization': `Bearer ${await ensureCoobToken()}`
       }
     });
 
@@ -2105,7 +2282,7 @@ app.post('/api/lp/info-apartment', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${COOBMAIS_TOKEN}`
+        'Authorization': `Bearer ${await ensureCoobToken()}`
       },
       body: JSON.stringify({
         hotel_id: parseInt(hotel_id),
@@ -2149,7 +2326,7 @@ async function getAssociateNic(cpfOrCnpj) {
   try {
     const clean = (cpfOrCnpj || '').replace(/\D/g, '');
     const res = await fetch(`${COOBMAIS_BASE_URL}/Associate/GetAssociate?cpfCnpj=${clean}&empCode=38`, {
-      headers: { 'Authorization': `Bearer ${COOBMAIS_TOKEN}` }
+      headers: { 'Authorization': `Bearer ${await ensureCoobToken()}` }
     });
     const data = await res.json();
     const nic = data?.AssNic || data?.assNic || data?.assnic || data?.nic || data?.codigo || null;
@@ -2198,7 +2375,7 @@ app.post('/api/lp/availability-book', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${COOBMAIS_TOKEN}`
+        'Authorization': `Bearer ${await ensureCoobToken()}`
       },
       body: JSON.stringify({
         token: booking_code,
@@ -2245,7 +2422,7 @@ app.post('/api/lp/booking-confirmation', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${COOBMAIS_TOKEN}`
+        'Authorization': `Bearer ${await ensureCoobToken()}`
       },
       body: JSON.stringify({
         token: booking_code,
@@ -2281,7 +2458,7 @@ app.get('/api/lp/category-list', async (req, res) => {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${COOBMAIS_TOKEN}`
+        'Authorization': `Bearer ${await ensureCoobToken()}`
       }
     });
     const data = await response.json();
@@ -2343,7 +2520,7 @@ app.post('/api/category-rates/sync', async (req, res) => {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${COOBMAIS_TOKEN}`
+        'Authorization': `Bearer ${await ensureCoobToken()}`
       }
     });
     const categories = await response.json();
@@ -2525,7 +2702,7 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${COOBMAIS_TOKEN}`
+          'Authorization': `Bearer ${await ensureCoobToken()}`
         },
         body: JSON.stringify({ token: cancelToken })
       });
@@ -2711,8 +2888,10 @@ app.get('/api/admin/bookings', async (req, res) => {
 // ========== VINDI PAYMENT INTEGRATION ==========
 
 let VINDI_API_KEY = process.env.VINDI_API_KEY;
-let VINDI_BASE_URL = 'sandbox-app.vindi.com.br';
+let VINDI_BASE_URL = 'app.vindi.com.br';
+let VINDI_PRODUCT_ID = process.env.VINDI_PRODUCT_ID ? parseInt(process.env.VINDI_PRODUCT_ID) : 1980987;
 if (apiConfigOverrides.Vindi?.token) VINDI_API_KEY = apiConfigOverrides.Vindi.token;
+if (apiConfigOverrides.Vindi?.productId) VINDI_PRODUCT_ID = parseInt(apiConfigOverrides.Vindi.productId);
 if (apiConfigOverrides.Vindi?.baseUrl) {
   try {
     const u = new URL(apiConfigOverrides.Vindi.baseUrl);
@@ -2786,6 +2965,15 @@ const VINDI_PRODUCT_ID_CACHE = { id: null };
 async function getOrCreateVindiProduct() {
   if (VINDI_PRODUCT_ID_CACHE.id) return VINDI_PRODUCT_ID_CACHE.id;
 
+  if (VINDI_PRODUCT_ID) {
+    const fetched = await vindiRequest('GET', `/products/${VINDI_PRODUCT_ID}`);
+    if (fetched.data?.product?.id && fetched.data.product.status === 'active') {
+      VINDI_PRODUCT_ID_CACHE.id = fetched.data.product.id;
+      return fetched.data.product.id;
+    }
+    console.warn('[VINDI] Configured VINDI_PRODUCT_ID', VINDI_PRODUCT_ID, 'não encontrado/inativo, tentando fallback HOSP_UNYCO');
+  }
+
   const existing = await vindiRequest('GET', '/products?query=code:HOSP_UNYCO');
   const products = existing.data?.products || [];
   if (products.length > 0 && products[0].status === 'active') {
@@ -2831,7 +3019,9 @@ async function findOrCreateVindiCustomer(name, email, cpf, phone) {
   }
   const created = await vindiRequest('POST', '/customers', customerBody);
   if (created.data?.customer?.id) return created.data.customer.id;
-  throw new Error(created.data?.errors?.map(e => e.message).join('; ') || 'Erro ao criar cliente na Vindi');
+  console.error('[VINDI] Customer create failed. Status:', created.status, 'Body:', JSON.stringify(customerBody), 'Errors:', JSON.stringify(created.data?.errors || created.data));
+  const errs = (created.data?.errors || []).map(e => `${e.parameter || e.id || 'campo'}: ${e.message}`).join('; ');
+  throw new Error(errs || 'Erro ao criar cliente na Vindi');
 }
 
 app.post('/api/vindi/create-bill', async (req, res) => {
@@ -2864,6 +3054,11 @@ app.post('/api/vindi/create-bill', async (req, res) => {
 
     if (!payment_method_code || !customer_name || !customer_cpf || !amount) {
       return res.status(400).json({ ok: false, error: 'Campos obrigatórios: payment_method_code, customer_name, customer_cpf, amount' });
+    }
+
+    if (!isValidCPF(customer_cpf)) {
+      console.warn('[VINDI] Rejected invalid CPF for customer:', customer_name);
+      return res.status(400).json({ ok: false, error: 'CPF inválido. Verifique seus dados de cadastro e tente novamente.' });
     }
 
     console.log('[VINDI] Creating bill:', JSON.stringify({
@@ -2940,6 +3135,14 @@ app.post('/api/vindi/create-bill', async (req, res) => {
         ]
       );
 
+      const lastTx = charge.last_transaction || {};
+      const gwFields = lastTx.gateway_response_fields || {};
+      const pixData = (payment_method_code === 'pix' || payment_method_code === 'pix_bank_slip') ? {
+        qrcode_original_path: gwFields.qrcode_original_path || gwFields.qrcode_text || gwFields.qr_code_emv || gwFields.qrCodeEmv || null,
+        qrcode_path: gwFields.qrcode_path || gwFields.qr_code_image_url || gwFields.qrCodeImageUrl || null,
+        max_days_to_keep_waiting_payment: gwFields.max_days_to_keep_waiting_payment || null,
+      } : null;
+
       res.json({
         ok: true,
         data: {
@@ -2951,6 +3154,8 @@ app.post('/api/vindi/create-bill', async (req, res) => {
           amount: bill.amount,
           status: charge.status || bill.status,
           paid_at: charge.paid_at,
+          payment_method: payment_method_code,
+          pix: pixData,
         },
       });
     } else {
@@ -2960,8 +3165,13 @@ app.post('/api/vindi/create-bill', async (req, res) => {
       res.status(result.status || 422).json({ ok: false, error: errorMsg, details: errors });
     }
   } catch (error) {
-    console.error('[VINDI] Create bill error:', error.message);
-    res.status(500).json({ ok: false, error: 'Erro ao processar pagamento. Tente novamente.' });
+    console.error('[VINDI] Create bill error:', error.message, error.stack);
+    const msg = error.message || '';
+    const isVindiValidationError = /registry_code|email|phone|name|number|cpf|inválido|invalid|obrigat/i.test(msg) && msg.length < 250;
+    res.status(500).json({
+      ok: false,
+      error: isVindiValidationError ? msg : 'Erro ao processar pagamento. Tente novamente.'
+    });
   }
 });
 
@@ -3009,7 +3219,8 @@ app.get('/api/payments', async (req, res) => {
         COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) as paid_amount,
         COALESCE(SUM(amount) FILTER (WHERE status = 'pending'), 0) as pending_amount,
         COUNT(*) FILTER (WHERE payment_method = 'credit_card') as credit_card_count,
-        COUNT(*) FILTER (WHERE payment_method = 'bank_slip') as bank_slip_count
+        COUNT(*) FILTER (WHERE payment_method = 'bank_slip') as bank_slip_count,
+        COUNT(*) FILTER (WHERE payment_method IN ('pix','pix_bank_slip')) as pix_count
       FROM payments
     `);
 
@@ -3066,10 +3277,30 @@ app.post('/api/payments/:id/refresh', async (req, res) => {
 
 app.get('/api/vindi/bill/:id', async (req, res) => {
   try {
+    const lpToken = parseLpToken(req);
+    const session = getLpSession(lpToken);
+    if (!session) return res.status(401).json({ ok: false, error: 'Sessão expirada' });
+
     if (!VINDI_API_KEY) {
       return res.status(500).json({ ok: false, error: 'Chave Vindi não configurada' });
     }
-    const result = await vindiRequest('GET', `/bills/${req.params.id}`);
+
+    const billId = req.params.id;
+    const ownership = await query(
+      `SELECT p.guest_cpf FROM payments p WHERE p.vindi_bill_id = $1 LIMIT 1`,
+      [billId]
+    );
+    if (ownership.rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Fatura não encontrada' });
+    }
+    const userRow = await query('SELECT cpf FROM users WHERE id = $1 LIMIT 1', [session.userId]);
+    const userCpf = (userRow.rows[0]?.cpf || '').replace(/\D/g, '');
+    const billCpf = (ownership.rows[0]?.guest_cpf || '').replace(/\D/g, '');
+    if (!userCpf || !billCpf || userCpf !== billCpf) {
+      return res.status(403).json({ ok: false, error: 'Acesso negado' });
+    }
+
+    const result = await vindiRequest('GET', `/bills/${billId}`);
     if (result.status === 200) {
       const bill = result.data.bill || result.data;
       const charge = bill.charges?.[0] || {};
@@ -3099,8 +3330,8 @@ app.get('/api/vindi/bill/:id', async (req, res) => {
 // ========== WHATSAPP AUTOMATION ==========
 
 const WHATSAPP_DEFAULTS = {
-  api_url: 'https://api.wescctech.com.br/core/v2/api/chats/send-text',
-  access_token: '61d49d8b20f435a8e6631bf6'
+  api_url: process.env.WHATSAPP_API_URL || 'https://api.wescctech.com.br/core/v2/api/chats/send-text',
+  access_token: process.env.WHATSAPP_API_TOKEN || ''
 };
 
 async function getWhatsAppConfig() {
@@ -3471,6 +3702,19 @@ async function initializeDatabase() {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+
+    const userColumns = [
+      ['cep', 'VARCHAR(15)'],
+      ['birth_date', 'DATE'],
+      ['address', 'TEXT'],
+      ['numero', 'VARCHAR(20)'],
+      ['bairro', 'VARCHAR(100)'],
+      ['cidade', 'VARCHAR(100)'],
+      ['estado', 'VARCHAR(5)'],
+    ];
+    for (const [col, type] of userColumns) {
+      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${col} ${type}`);
+    }
 
     console.log('[DB] Database initialized successfully');
   } catch (err) {
