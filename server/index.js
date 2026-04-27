@@ -1576,6 +1576,7 @@ app.post('/api/central/coobmais/refresh-token', async (req, res) => {
     }
     COOBMAIS_TOKEN = '';
     coobmaisTokenExp = 0;
+    coobmaisCredsGen += 1;
     if (apiConfigOverrides.Coobmais) delete apiConfigOverrides.Coobmais.token;
     const token = await ensureCoobToken();
     const tokenPreview = token && token.length > 24 ? token.slice(0, 18) + '...' + token.slice(-12) : token;
@@ -1645,6 +1646,7 @@ app.put('/api/central/apis/:name', async (req, res) => {
       if (credsChanged) {
         COOBMAIS_TOKEN = '';
         coobmaisTokenExp = 0;
+        coobmaisCredsGen += 1;
         delete apiConfigOverrides[name].token;
       }
     }
@@ -1768,6 +1770,7 @@ let COOBMAIS_ACCESS_KEY = process.env.COOBMAIS_ACCESS_KEY || '';
 let COOBMAIS_PASSWORD = process.env.COOBMAIS_PASSWORD || '';
 let coobmaisTokenExp = 0;
 let coobmaisAuthInflight = null;
+let coobmaisCredsGen = 0;
 
 if (apiConfigOverrides.Coobmais?.baseUrl) COOBMAIS_BASE_URL = apiConfigOverrides.Coobmais.baseUrl.replace(/\/+$/, '');
 if (apiConfigOverrides.Coobmais?.authUrl) COOBMAIS_AUTH_URL = apiConfigOverrides.Coobmais.authUrl;
@@ -1778,7 +1781,10 @@ if (apiConfigOverrides.Coobmais?.token) {
   try {
     const payload = JSON.parse(Buffer.from(COOBMAIS_TOKEN.split('.')[1] + '==', 'base64').toString());
     coobmaisTokenExp = (payload.exp || 0) * 1000;
-  } catch (_) {}
+  } catch (_) {
+    // Fallback se decode falhar e há credenciais para refresh — assume valido por 1h
+    coobmaisTokenExp = (COOBMAIS_ACCESS_KEY && COOBMAIS_PASSWORD) ? Date.now() + 60 * 60 * 1000 : Date.now() + 30 * 24 * 60 * 60 * 1000;
+  }
 }
 
 async function ensureCoobToken() {
@@ -1790,12 +1796,16 @@ async function ensureCoobToken() {
     throw new Error('Coobmais não configurada: defina AccessKey e password na Central de APIs');
   }
   if (coobmaisAuthInflight) return coobmaisAuthInflight;
+  const startGen = coobmaisCredsGen;
+  const accessKey = COOBMAIS_ACCESS_KEY;
+  const password = COOBMAIS_PASSWORD;
+  const authUrl = COOBMAIS_AUTH_URL;
   coobmaisAuthInflight = (async () => {
     try {
-      const resp = await fetch(COOBMAIS_AUTH_URL, {
+      const resp = await fetch(authUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ AccessKey: COOBMAIS_ACCESS_KEY, password: COOBMAIS_PASSWORD }),
+        body: JSON.stringify({ AccessKey: accessKey, password }),
       });
       if (!resp.ok) {
         const errBody = await resp.text().catch(() => '');
@@ -1804,12 +1814,18 @@ async function ensureCoobToken() {
       const data = await resp.json();
       const newToken = data?.token;
       if (!newToken) throw new Error('Resposta de login Coobmais sem campo token');
+      // Se as credenciais mudaram durante o login, descarta o resultado
+      if (startGen !== coobmaisCredsGen) {
+        console.log('[Coobmais] Login obsoleto descartado (credenciais mudaram)');
+        throw new Error('Credenciais Coobmais foram alteradas durante o login. Tente novamente.');
+      }
       COOBMAIS_TOKEN = newToken;
       try {
         const payload = JSON.parse(Buffer.from(newToken.split('.')[1] + '==', 'base64').toString());
         coobmaisTokenExp = (payload.exp || 0) * 1000;
       } catch (_) {
-        coobmaisTokenExp = Date.now() + 30 * 60 * 1000;
+        // Fallback alinhado com vida útil esperada do JWT Coobmais (~31 dias)
+        coobmaisTokenExp = Date.now() + 30 * 24 * 60 * 60 * 1000;
       }
       if (!apiConfigOverrides.Coobmais) apiConfigOverrides.Coobmais = {};
       apiConfigOverrides.Coobmais.token = newToken;
