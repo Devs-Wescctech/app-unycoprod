@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { X, Save, User, Mail, Phone, MapPin, Calendar, Award, CheckCircle2, Clock, Loader2, Search } from 'lucide-react';
+import { X, Save, User, Mail, Phone, MapPin, Calendar, Award, CheckCircle2, Clock, Loader2, Search, Lock, Eye, EyeOff, KeyRound } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useCreateUser, useUpdateUser, useCreateSubscription, useUpdateSubscription } from '@/hooks/useUsersSubscriptions';
 import { usePlans } from '@/hooks/usePlans';
@@ -12,6 +12,9 @@ import { useToast } from '@/components/ui/use-toast';
 import { translateError } from '@/lib/errorMessages';
 import { getUser } from '@/services/apiClient';
 import { useSystemConfig } from '@/hooks/useSystemConfig';
+import { useAuth } from '@/contexts/AuthContext';
+
+const PASSWORD_MIN_LENGTH = 6;
 
 function formatDateForInput(dateString) {
   if (!dateString) return '';
@@ -38,7 +41,14 @@ export default function DrawerCadastro({ isOpen, onClose, onSuccess, mode, cadas
   const updateSubscription = useUpdateSubscription();
   const { data: planos = [] } = usePlans();
   const { plansEnabled } = useSystemConfig();
-  
+  const { user: authUser } = useAuth();
+  const canEditPassword = authUser?.role === 'admin';
+
+  const [password, setPassword] = React.useState('');
+  const [passwordConfirm, setPasswordConfirm] = React.useState('');
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [showPasswordSection, setShowPasswordSection] = React.useState(false);
+
   const [formData, setFormData] = React.useState({
     nome: '',
     sobrenome: '',
@@ -165,6 +175,10 @@ export default function DrawerCadastro({ isOpen, onClose, onSuccess, mode, cadas
     
     if (isOpen) {
       loadUserData();
+      setPassword('');
+      setPasswordConfirm('');
+      setShowPassword(false);
+      setShowPasswordSection(mode === 'new');
     }
   }, [cadastro, mode, isOpen]);
 
@@ -192,6 +206,18 @@ export default function DrawerCadastro({ isOpen, onClose, onSuccess, mode, cadas
       return;
     }
 
+    const wantsToSetPassword = canEditPassword && (password.length > 0 || passwordConfirm.length > 0);
+    if (wantsToSetPassword) {
+      if (password.length < PASSWORD_MIN_LENGTH) {
+        toast({ title: 'Senha inválida', description: `A senha deve ter no mínimo ${PASSWORD_MIN_LENGTH} caracteres`, variant: 'destructive' });
+        return;
+      }
+      if (password !== passwordConfirm) {
+        toast({ title: 'Senhas não conferem', description: 'A confirmação deve ser igual à nova senha', variant: 'destructive' });
+        return;
+      }
+    }
+
     setIsSaving(true);
 
     try {
@@ -210,6 +236,10 @@ export default function DrawerCadastro({ isOpen, onClose, onSuccess, mode, cadas
         cidade: formData.cidade,
         estado: formData.estado
       };
+
+      if (wantsToSetPassword) {
+        userPayload.password = password;
+      }
 
       if (mode === 'edit' && cadastro?.id) {
         await updateUser.mutateAsync({
@@ -495,6 +525,89 @@ export default function DrawerCadastro({ isOpen, onClose, onSuccess, mode, cadas
               </div>
             </div>
           </div>
+
+          {canEditPassword && (mode === 'new' || mode === 'edit') && (
+            <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
+              <h3 className="text-base font-bold text-[#2e6299] uppercase tracking-wide mb-6 flex items-center gap-2 pb-3 border-b border-slate-100">
+                <Lock className="w-5 h-5" />
+                {mode === 'new' ? 'Senha de Acesso' : 'Redefinir Senha'}
+              </h3>
+
+              {mode === 'edit' && !showPasswordSection && (
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-sm text-slate-600">
+                    Defina uma nova senha para este membro. A senha atual será substituída.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowPasswordSection(true)}
+                    className="shrink-0"
+                  >
+                    <KeyRound className="w-4 h-4 mr-2" />
+                    Definir nova senha
+                  </Button>
+                </div>
+              )}
+
+              {(mode === 'new' || showPasswordSection) && (
+                <div className="space-y-4">
+                  {mode === 'new' && (
+                    <p className="text-xs text-slate-500">
+                      Opcional. Se preenchida, o membro poderá acessar a área do cliente com este e-mail e senha. Mínimo de {PASSWORD_MIN_LENGTH} caracteres.
+                    </p>
+                  )}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-sm font-medium text-slate-700">
+                        {mode === 'new' ? 'Senha' : 'Nova senha'}
+                      </Label>
+                      <div className="relative mt-1.5">
+                        <Input
+                          type={showPassword ? 'text' : 'password'}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder={`Mínimo ${PASSWORD_MIN_LENGTH} caracteres`}
+                          autoComplete="new-password"
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(s => !s)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                          tabIndex={-1}
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-slate-700">Confirmar senha</Label>
+                      <Input
+                        type={showPassword ? 'text' : 'password'}
+                        value={passwordConfirm}
+                        onChange={(e) => setPasswordConfirm(e.target.value)}
+                        placeholder="Repita a senha"
+                        autoComplete="new-password"
+                        className="mt-1.5"
+                      />
+                    </div>
+                  </div>
+                  {mode === 'edit' && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setShowPasswordSection(false); setPassword(''); setPasswordConfirm(''); }}
+                      className="text-slate-500 hover:text-slate-700"
+                    >
+                      Cancelar redefinição de senha
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {plansEnabled && (mode === 'new' || mode === 'edit') && (
             <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200">
