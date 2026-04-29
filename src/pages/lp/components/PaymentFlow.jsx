@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CreditCard, Loader2, CheckCircle2, AlertTriangle,
-  Lock, ArrowLeft, Shield, Wallet, ChevronDown
+  Lock, ArrowLeft, Shield, Wallet, ChevronDown, QrCode, Copy, Check, Clock
 } from 'lucide-react';
 
 function formatCurrency(value) {
@@ -68,11 +68,17 @@ function PaymentLoader() {
 }
 
 export default function PaymentFlow({ hotel, apartment, searchParams, user, onClose, onBack, onPaymentSuccess }) {
-  const [step, setStep] = useState('form');
-  const [paymentMethod, setPaymentMethod] = useState('credit_card');
+  const [step, setStep] = useState('choose');
+  const [paymentMethod, setPaymentMethod] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [pixCopied, setPixCopied] = useState(false);
+  const [pixExpired, setPixExpired] = useState(false);
+  const pollIntervalRef = useRef(null);
+  const pollTimeoutRef = useRef(null);
+  const POLL_MAX_MS = 15 * 60 * 1000;
+  const POLL_INTERVAL_MS = 5000;
 
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
@@ -82,6 +88,18 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
 
   const totalAmount = apartment?.total_price || 0;
   const brand = detectCardBrand(cardNumber);
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
+    };
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
+    if (pollTimeoutRef.current) { clearTimeout(pollTimeoutRef.current); pollTimeoutRef.current = null; }
+  }, []);
 
   const validateCard = () => {
     const num = cardNumber.replace(/\s/g, '');
@@ -136,7 +154,11 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
 
       if (data.ok) {
         const isPaid = data.data?.charge_status === 'paid';
-        if (isPaid && onPaymentSuccess) {
+        if (method === 'pix') {
+          setResult(data.data);
+          setStep('pix-display');
+          startPixPolling(data.data.bill_id);
+        } else if (isPaid && onPaymentSuccess) {
           onPaymentSuccess(data.data);
         } else if (!isPaid) {
           setError('Pagamento não foi aprovado. Tente novamente.');
@@ -154,6 +176,42 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
     }
   }, [user, totalAmount, hotel, apartment, installments, cardNumber, cardExpiry, cardCvv, cardHolder, brand, onPaymentSuccess]);
 
+  const startPixPolling = useCallback((billId) => {
+    stopPolling();
+    setPixExpired(false);
+    const FINAL_NEGATIVE = ['canceled', 'cancelled', 'charge_canceled_dev', 'failed', 'expired'];
+
+    pollTimeoutRef.current = setTimeout(() => {
+      stopPolling();
+      setPixExpired(true);
+    }, POLL_MAX_MS);
+
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/vindi/bill/${billId}`, { credentials: 'same-origin' });
+        const data = await res.json();
+        if (!data.ok) return;
+        const status = data.data?.charge_status || data.data?.status;
+        if (status === 'paid') {
+          stopPolling();
+          if (onPaymentSuccess) onPaymentSuccess({ ...result, ...data.data, bill_id: billId, charge_status: 'paid' });
+        } else if (FINAL_NEGATIVE.includes(status)) {
+          stopPolling();
+          setPixExpired(true);
+        }
+      } catch (_) {}
+    }, POLL_INTERVAL_MS);
+  }, [onPaymentSuccess, result, stopPolling]);
+
+  const handleCopyPix = () => {
+    const code = result?.pix?.qrcode_original_path;
+    if (!code) return;
+    navigator.clipboard.writeText(code).then(() => {
+      setPixCopied(true);
+      setTimeout(() => setPixCopied(false), 2500);
+    });
+  };
+
   const handleCreditCardSubmit = () => {
     const validationError = validateCard();
     if (validationError) {
@@ -162,6 +220,16 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
     }
     setError('');
     handlePayment('credit_card');
+  };
+
+  const handleChooseMethod = (method) => {
+    setError('');
+    setPaymentMethod(method);
+    if (method === 'credit_card') {
+      setStep('form');
+    } else if (method === 'pix') {
+      handlePayment('pix');
+    }
   };
 
 
@@ -176,7 +244,7 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
         <h3 className="text-lg font-bold text-gray-800 mb-1">Erro no Pagamento</h3>
         <p className="text-sm text-red-500 mb-5 max-w-sm mx-auto">{error}</p>
         <div className="flex gap-3 justify-center">
-          <button onClick={() => { setStep(paymentMethod ? 'form' : 'choose'); setError(''); }} className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2.5 rounded-xl transition-all text-sm">
+          <button onClick={() => { stopPolling(); setStep(paymentMethod === 'credit_card' ? 'form' : 'choose'); setError(''); }} className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2.5 rounded-xl transition-all text-sm">
             Tentar novamente
           </button>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-sm font-medium transition-colors">
@@ -187,7 +255,7 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
     );
   }
 
-  if (step === 'form' && paymentMethod === 'credit_card') {
+  if (step === 'choose') {
     return (
       <div style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
         <div className="flex items-center gap-3 mb-5">
@@ -196,6 +264,150 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
               <ArrowLeft className="w-4 h-4 text-gray-500" />
             </button>
           )}
+          <div>
+            <h3 className="text-base font-bold text-gray-800">Forma de pagamento</h3>
+            <p className="text-[11px] text-gray-400">Escolha como deseja pagar sua reserva</p>
+          </div>
+        </div>
+
+        <div className="bg-blue-50/80 border border-blue-100 rounded-xl p-4 mb-5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Wallet className="w-4 h-4 text-blue-500" />
+            <span className="text-xs font-medium text-blue-700">Total a pagar</span>
+          </div>
+          <span className="text-lg font-bold text-gray-800">R$ {formatCurrency(totalAmount)}</span>
+        </div>
+
+        <div className="space-y-3 mb-4">
+          <button
+            onClick={() => handleChooseMethod('pix')}
+            className="w-full bg-white border border-gray-200 hover:border-emerald-400 hover:bg-emerald-50/30 rounded-2xl p-4 flex items-center gap-4 transition-all text-left active:scale-[0.99] group"
+          >
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-100 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+              <QrCode className="w-6 h-6 text-emerald-500" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-gray-800">Pix</p>
+              <p className="text-[11px] text-gray-500">Aprovação imediata, sem taxas</p>
+            </div>
+            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">Instantâneo</span>
+          </button>
+
+          <button
+            onClick={() => handleChooseMethod('credit_card')}
+            className="w-full bg-white border border-gray-200 hover:border-blue-400 hover:bg-blue-50/30 rounded-2xl p-4 flex items-center gap-4 transition-all text-left active:scale-[0.99] group"
+          >
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+              <CreditCard className="w-6 h-6 text-blue-500" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-gray-800">Cartão de Crédito</p>
+              <p className="text-[11px] text-gray-500">Parcele em até 6x</p>
+            </div>
+            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md">Em até 6x</span>
+          </button>
+        </div>
+
+        <p className="text-[10px] text-gray-400 text-center mt-2 flex items-center justify-center gap-1">
+          <Shield className="w-2.5 h-2.5" /> Pagamento seguro processado pela Vindi
+        </p>
+      </div>
+    );
+  }
+
+  if (step === 'pix-display') {
+    const pix = result?.pix || {};
+    return (
+      <div style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={() => { stopPolling(); setStep('choose'); setResult(null); setPixExpired(false); }} className="w-9 h-9 rounded-xl bg-gray-50 hover:bg-gray-100 border border-gray-100 flex items-center justify-center transition-all hover:scale-105">
+            <ArrowLeft className="w-4 h-4 text-gray-500" />
+          </button>
+          <div>
+            <h3 className="text-base font-bold text-gray-800">Pague com Pix</h3>
+            <p className="text-[11px] text-gray-400">Aponte a câmera do seu app bancário</p>
+          </div>
+        </div>
+
+        <div className="bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-100 rounded-2xl p-5 mb-4 text-center">
+          {pix.qrcode_path ? (
+            <img
+              src={pix.qrcode_path}
+              alt="QR Code Pix"
+              className="w-56 h-56 mx-auto rounded-xl bg-white p-2 shadow-md"
+            />
+          ) : (
+            <div className="w-56 h-56 mx-auto rounded-xl bg-white flex items-center justify-center shadow-md">
+              <QrCode className="w-24 h-24 text-gray-300" />
+            </div>
+          )}
+          {pixExpired ? (
+            <>
+              <div className="mt-4 flex items-center justify-center gap-2 text-red-600">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span className="text-xs font-semibold">Pix expirado ou cancelado</span>
+              </div>
+              <button
+                onClick={() => { setResult(null); setPixExpired(false); handlePayment('pix'); }}
+                className="mt-3 inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-all"
+              >
+                <QrCode className="w-3.5 h-3.5" /> Gerar novo Pix
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="mt-4 flex items-center justify-center gap-2 text-emerald-700">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span className="text-xs font-semibold">Aguardando pagamento…</span>
+              </div>
+              <p className="text-[10px] text-emerald-600/70 mt-1">A confirmação é automática assim que cair</p>
+            </>
+          )}
+        </div>
+
+        {pix.qrcode_original_path && (
+          <div className="bg-white border border-gray-200 rounded-xl p-3 mb-4">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Pix Copia e Cola</p>
+            <div className="flex items-center gap-2">
+              <p className="flex-1 text-[11px] font-mono text-gray-700 break-all line-clamp-2 leading-snug">
+                {pix.qrcode_original_path}
+              </p>
+              <button
+                onClick={handleCopyPix}
+                className={`flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-all ${pixCopied ? 'bg-emerald-500 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}
+                title="Copiar código Pix"
+              >
+                {pixCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 mb-4 flex items-start gap-2">
+          <Clock className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <p className="text-[11px] text-amber-700 leading-relaxed">
+            O Pix expira em alguns minutos. Após pagar, sua reserva será confirmada automaticamente.
+          </p>
+        </div>
+
+        <div className="bg-blue-50/80 border border-blue-100 rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Wallet className="w-4 h-4 text-blue-500" />
+            <span className="text-xs font-medium text-blue-700">Total a pagar</span>
+          </div>
+          <span className="text-lg font-bold text-gray-800">R$ {formatCurrency(totalAmount)}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 'form' && paymentMethod === 'credit_card') {
+    return (
+      <div style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={() => { setStep('choose'); setError(''); }} className="w-9 h-9 rounded-xl bg-gray-50 hover:bg-gray-100 border border-gray-100 flex items-center justify-center transition-all hover:scale-105">
+            <ArrowLeft className="w-4 h-4 text-gray-500" />
+          </button>
           <div>
             <h3 className="text-base font-bold text-gray-800">Pagamento</h3>
             <p className="text-[11px] text-gray-400">Preencha os dados do cartão de crédito</p>
