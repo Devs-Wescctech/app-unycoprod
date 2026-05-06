@@ -3,6 +3,7 @@ name: Build and Push Docker Image
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   build-and-push:
@@ -14,6 +15,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Compute lowercase image name
+        id: img
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -28,5 +33,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/devs-wescctech/app-unycoprod:latest
-            ghcr.io/devs-wescctech/app-unycoprod:${{ github.sha }}
+            ghcr.io/${{ steps.img.outputs.name }}:latest
+            ghcr.io/${{ steps.img.outputs.name }}:${{ github.sha }}
