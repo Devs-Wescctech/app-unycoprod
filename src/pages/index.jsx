@@ -1,34 +1,38 @@
+import { lazy, Suspense } from 'react';
 import Layout from "./Layout.jsx";
 import Login from "./Login";
-import Dashboard from "./Dashboard";
-import Sync from "./Sync";
-import SearchTotvs from "./SearchTotvs";
-import Cadastros from "./Cadastros";
-import Planos from "./Planos";
-import Usuarios from "./Usuarios";
-import Pagamentos from "./Pagamentos";
-import DashboardReservas from "./DashboardReservas";
-import WhatsAppFlows from "./WhatsAppFlows";
-import CentralAPIs from "./CentralAPIs";
-import Configuracoes from "./Configuracoes";
 import LPHome from "./lp/LPHome";
 import { useAuth } from '@/contexts/AuthContext';
 import { useSystemConfig } from '@/hooks/useSystemConfig';
 import { Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 
+const Dashboard = lazy(() => import('./Dashboard'));
+const Sync = lazy(() => import('./Sync'));
+const SearchTotvs = lazy(() => import('./SearchTotvs'));
+const Cadastros = lazy(() => import('./Cadastros'));
+const Planos = lazy(() => import('./Planos'));
+const Usuarios = lazy(() => import('./Usuarios'));
+const Pagamentos = lazy(() => import('./Pagamentos'));
+const DashboardReservas = lazy(() => import('./DashboardReservas'));
+const WhatsAppFlows = lazy(() => import('./WhatsAppFlows'));
+const EmailFlows = lazy(() => import('./EmailFlows'));
+const CentralAPIs = lazy(() => import('./CentralAPIs'));
+const Configuracoes = lazy(() => import('./Configuracoes'));
+const GerenciarFAQ = lazy(() => import('./GerenciarFAQ'));
+
+function PageLoader() {
+    return (
+        <div className="flex items-center justify-center h-full min-h-[400px]">
+            <Loader2 className="animate-spin h-8 w-8 text-[#2e6299]" />
+        </div>
+    );
+}
+
 const PAGES = {
-    Dashboard: Dashboard,
-    Sync: Sync,
-    SearchTotvs: SearchTotvs,
-    Cadastros: Cadastros,
-    Planos: Planos,
-    Usuarios: Usuarios,
-    Pagamentos: Pagamentos,
-    DashboardReservas: DashboardReservas,
-    WhatsAppFlows: WhatsAppFlows,
-    CentralAPIs: CentralAPIs,
-    Configuracoes: Configuracoes,
+    Dashboard, Sync, SearchTotvs, Cadastros, Planos,
+    Usuarios, Pagamentos, DashboardReservas, WhatsAppFlows, EmailFlows,
+    CentralAPIs, Configuracoes, GerenciarFAQ,
 }
 
 function _getCurrentPage(url) {
@@ -70,6 +74,7 @@ function AuthenticatedRoutes() {
     
     return (
         <Layout currentPageName={currentPage}>
+            <Suspense fallback={<PageLoader />}>
             <Routes>            
                 <Route path="/" element={
                     <ProtectedRoute permission="dashboard">
@@ -131,6 +136,12 @@ function AuthenticatedRoutes() {
                     </ProtectedRoute>
                 } />
 
+                <Route path="/EmailFlows" element={
+                    <ProtectedRoute permission="whatsapp">
+                        <EmailFlows />
+                    </ProtectedRoute>
+                } />
+
                 <Route path="/CentralAPIs" element={
                     <ProtectedRoute permission="admin">
                         <CentralAPIs />
@@ -143,8 +154,15 @@ function AuthenticatedRoutes() {
                     </ProtectedRoute>
                 } />
 
+                <Route path="/GerenciarFAQ" element={
+                    <ProtectedRoute permission="admin">
+                        <GerenciarFAQ />
+                    </ProtectedRoute>
+                } />
+
                 <Route path="*" element={<Navigate to="/crm" replace />} />
             </Routes>
+            </Suspense>
         </Layout>
     );
 }

@@ -4,7 +4,7 @@ import { differenceInCalendarDays } from 'date-fns';
 
 const FALLBACK_IMG = '/lp/assets/img/gtr.jpg';
 
-export default function HotelCard({ hotel, onViewDetails, onBooking, searchParams }) {
+export default function HotelCard({ hotel, onViewDetails, onBooking, searchParams, marketPricePerNight }) {
   const [favorite, setFavorite] = useState(false);
   const [imgError, setImgError] = useState(false);
 
@@ -30,7 +30,11 @@ export default function HotelCard({ hotel, onViewDetails, onBooking, searchParam
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent group-hover:from-black/70 group-hover:via-black/20 transition-all duration-500" />
 
         <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-blue-500/90 backdrop-blur-sm text-white text-[11px] font-semibold px-3 py-1.5 rounded-full">
-          <Star className="w-3 h-3 fill-white" /> Tarifa Unyco
+          <Star className="w-3 h-3 fill-white" />
+          {hotel.category_name === 'Silver' ? 'Econômico'
+            : hotel.category_name === 'Gold' ? 'Superior'
+            : hotel.category_name === 'Diamante' ? 'Luxo'
+            : 'Tarifa Unyco'}
         </div>
 
         <button
@@ -76,6 +80,19 @@ export default function HotelCard({ hotel, onViewDetails, onBooking, searchParam
                 <span className="text-[11px] text-gray-400">R$</span>
                 <span className="text-2xl font-bold text-gray-800">{priceFormatted}</span>
               </div>
+              {marketPricePerNight && (() => {
+                const unycoDaily = hotel.price || 0;
+                const savingsPct = unycoDaily > 0 && unycoDaily < marketPricePerNight
+                  ? Math.round(((marketPricePerNight - unycoDaily) / marketPricePerNight) * 100) : 0;
+                return (
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    <span className="text-[11px] text-gray-400 line-through">R${marketPricePerNight}/noite</span>
+                    {savingsPct > 0 && (
+                      <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">-{savingsPct}%</span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <button

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { format } from 'date-fns';
+import { format, addDays } from 'date-fns';
 import {
   Dialog,
   DialogContent,
@@ -13,9 +13,10 @@ import {
   ShieldCheck, Ban, Lock, Car, PawPrint, Zap, ArrowUpDown,
   DoorOpen, Accessibility, Eye, ImageOff, Gift,
   Phone, Mail, CreditCard, Check, CircleAlert, Sparkles,
-  ChevronRight, Info, X, Clock, Wallet
+  ChevronRight, Info, X, Wallet
 } from 'lucide-react';
 import PaymentFlow from './PaymentFlow';
+import BookingAlternativesModal from './BookingAlternativesModal';
 
 function formatCurrency(value) {
   return (value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -167,7 +168,7 @@ function StepIndicator({ currentStep }) {
   );
 }
 
-export default function BookingFlow({ hotel, searchParams, user, open, onClose }) {
+export default function BookingFlow({ hotel, searchParams, user, open, onClose, onUserUpdate }) {
   const [step, setStep] = useState(1);
   const [apartments, setApartments] = useState([]);
   const [loadingApartments, setLoadingApartments] = useState(false);
@@ -176,10 +177,58 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose }
   const [availabilityResult, setAvailabilityResult] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [bookingResult, setBookingResult] = useState(null);
+  const [bookingLocator, setBookingLocator] = useState(null);
+  const [reserving, setReserving] = useState(false);
+  const [paymentCompleted, setPaymentCompleted] = useState(false);
   const [error, setError] = useState('');
   const [expandedPolicy, setExpandedPolicy] = useState(false);
+  const [alternativesModalOpen, setAlternativesModalOpen] = useState(false);
+  const [effectiveDates, setEffectiveDates] = useState(null);
+  const [extendedBy, setExtendedBy] = useState(0);
+
+  const applyRates = useCallback((parsed) => {
+    const lowRate = hotel.category_low_rate;
+    const highRate = hotel.category_high_rate;
+    const highMonths = hotel.high_season_months || [];
+    const hasRates = (lowRate && lowRate > 0) || (highRate && highRate > 0);
+    if (!hasRates || !searchParams?.checkIn) return parsed;
+    const checkInMonth = searchParams.checkIn.getMonth() + 1;
+    const isHighSeason = highMonths.includes(checkInMonth);
+    const appliedRate = isHighSeason ? (highRate || lowRate) : (lowRate || highRate);
+    const seasonLabel = isHighSeason ? 'Alta' : 'Baixa';
+    if (!appliedRate || appliedRate <= 0) return parsed;
+    return parsed.map(apt => {
+      const newCost = (apt.cost || []).map(c => ({ ...c, daily: appliedRate }));
+      const newTotal = newCost.reduce((sum, c) => sum + (c.daily || 0) + (c.extras || 0), 0);
+      return { ...apt, cost: newCost, total_price: newTotal, original_daily: apt.cost?.[0]?.daily || 0, category_name: hotel.category_name, season_label: seasonLabel };
+    });
+  }, [hotel?.category_low_rate, hotel?.category_high_rate, hotel?.high_season_months, hotel?.category_name, searchParams?.checkIn]);
+
+  const fetchForDates = useCallback(async (startDate, endDate, signal) => {
+    const res = await fetch('/api/lp/info-apartment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      signal,
+      body: JSON.stringify({
+        hotel_id: hotel.id,
+        start_date: startDate,
+        end_date: endDate,
+        adults: searchParams.adults || 2,
+        children: searchParams.children || 0,
+        children_age: searchParams.childrenAges || [],
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) return [];
+    const raw = data.data;
+    const list = Array.isArray(raw) ? raw : (raw?.apartments || raw?.data || []);
+    return list.map(item => item.apartment || item).filter(Boolean);
+  }, [hotel?.id, searchParams?.adults, searchParams?.children, searchParams?.childrenAges]);
 
   const fetchApartments = useCallback(async () => {
+    void searchParams?.children;
+    void searchParams?.childrenAges;
     if (!hotel?.id || !searchParams?.checkIn || !searchParams?.checkOut) return;
 
     setStep(1);
@@ -187,77 +236,47 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose }
     setSelectedApartment(null);
     setAvailabilityResult(null);
     setBookingResult(null);
+    setBookingLocator(null);
+    setPaymentCompleted(false);
     setError('');
     setExpandedPolicy(false);
+    setEffectiveDates(null);
+    setExtendedBy(0);
     setLoadingApartments(true);
 
-    const startDate = format(searchParams.checkIn, 'dd/MM/yyyy');
-    const endDate = format(searchParams.checkOut, 'dd/MM/yyyy');
-
+    const ctrl = new AbortController();
+    const timeoutId = setTimeout(() => ctrl.abort(), 120000);
     try {
-      const res = await fetch('/api/lp/info-apartment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          hotel_id: hotel.id,
-          start_date: startDate,
-          end_date: endDate,
-          adults: searchParams.adults || 2,
-          children: 0,
-          children_age: 0,
-        }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        const raw = data.data;
-        const list = Array.isArray(raw) ? raw : (raw?.apartments || raw?.data || []);
-        let parsed = list.map(item => item.apartment || item).filter(Boolean);
+      const MAX_EXTRA = 5;
+      let parsed = [];
+      let usedExtra = 0;
 
-        const lowRate = hotel.category_low_rate;
-        const highRate = hotel.category_high_rate;
-        const highMonths = hotel.high_season_months || [];
-        const hasRates = (lowRate && lowRate > 0) || (highRate && highRate > 0);
-        const isDiamante = hotel.category_name === 'Diamante';
-
-        if (hasRates && searchParams?.checkIn) {
-          const checkInMonth = searchParams.checkIn.getMonth() + 1;
-          const isHighSeason = highMonths.includes(checkInMonth);
-          const appliedRate = isDiamante ? lowRate : (isHighSeason ? (highRate || lowRate) : (lowRate || highRate));
-          const seasonLabel = isDiamante ? 'Fixa' : (isHighSeason ? 'Alta' : 'Baixa');
-
-          if (appliedRate && appliedRate > 0) {
-            parsed = parsed.map(apt => {
-              const newCost = (apt.cost || []).map(c => ({
-                ...c,
-                daily: appliedRate,
-              }));
-              const newTotal = newCost.reduce((sum, c) => sum + (c.daily || 0) + (c.extras || 0), 0);
-              return {
-                ...apt,
-                cost: newCost,
-                total_price: newTotal,
-                original_daily: apt.cost?.[0]?.daily || 0,
-                category_name: hotel.category_name,
-                season_label: seasonLabel,
-              };
-            });
-          }
-        }
-
-        setApartments(parsed);
-        if (parsed.length === 0) {
-          setError('Nenhum apartamento encontrado para este hotel nas datas selecionadas.');
-        }
-      } else {
-        setError(data.error || 'Não foi possível carregar os apartamentos.');
+      for (let extra = 0; extra <= MAX_EXTRA; extra++) {
+        const checkOut = addDays(searchParams.checkOut, extra);
+        const startDate = format(searchParams.checkIn, 'dd/MM/yyyy');
+        const endDate = format(checkOut, 'dd/MM/yyyy');
+        parsed = await fetchForDates(startDate, endDate, ctrl.signal);
+        if (parsed.length > 0) { usedExtra = extra; break; }
       }
-    } catch {
-      setError('Erro de conexão ao buscar apartamentos.');
+
+      clearTimeout(timeoutId);
+      parsed = applyRates(parsed);
+      setApartments(parsed);
+      setExtendedBy(usedExtra);
+      if (parsed.length === 0) {
+        setError('Nenhum apartamento encontrado para este hotel nas datas selecionadas.');
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        setError('A consulta na Coobmais demorou demais. Clique em "Tentar novamente".');
+      } else {
+        setError('Erro de conexão ao buscar apartamentos. Clique em "Tentar novamente".');
+      }
     } finally {
       setLoadingApartments(false);
     }
-  }, [hotel?.id, searchParams?.checkIn, searchParams?.checkOut, searchParams?.adults]);
+  }, [hotel?.id, searchParams?.checkIn, searchParams?.checkOut, searchParams?.adults, fetchForDates, applyRates]);
 
   useEffect(() => {
     if (open) fetchApartments();
@@ -265,140 +284,166 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose }
 
   const handleSelectApartment = (apt) => {
     setSelectedApartment(apt);
-    setStep(2);
     setAvailabilityResult(null);
+    setBookingResult(null);
+    setBookingLocator(null);
     setError('');
+    setEffectiveDates(null);
+    setStep(2);
   };
 
-  const handleGoToPayment = () => {
+  const handleSelectAlternative = ({ apt, checkIn, checkOut }) => {
+    setSelectedApartment(apt);
+    setEffectiveDates({ checkIn, checkOut });
+    setAlternativesModalOpen(false);
+    setAvailabilityResult(null);
+    setBookingResult(null);
+    setBookingLocator(null);
     setError('');
-    setStep(3);
+    setStep(2);
   };
 
-  const handlePaymentSuccess = async (paymentResult) => {
+  const proceedWithReservation = async (aptToUse) => {
+    const apt = aptToUse || selectedApartment;
+    if (!apt) return;
+    setError('');
+    setReserving(true);
     setCheckingAvailability(true);
-    setConfirming(false);
-    setError('');
-    setStep(4);
 
     try {
-      const res = await fetch('/api/lp/availability-book', {
+      const availRes = await fetch('/api/lp/availability-book', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({
-          booking_code: selectedApartment.booking_code,
+          booking_code: apt.booking_code,
           hotel_id: hotel.id,
         }),
       });
-      const data = await res.json();
-      setAvailabilityResult(data);
+      const availData = await availRes.json();
+      setAvailabilityResult(availData);
 
-      if (data.ok) {
-        setConfirming(true);
-        const confirmRes = await fetch('/api/lp/booking-confirmation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({
-            booking_code: selectedApartment.booking_code,
-            hotel_id: hotel.id,
-          }),
-        });
-        const confirmData = await confirmRes.json();
-        setBookingResult(confirmData);
-
-        if (confirmData.ok && confirmData.data?.localizador) {
-          try {
-            await fetch('/api/lp/bookings', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              body: JSON.stringify({
-                hotel_id: hotel.id,
-                hotel_name: hotel.name,
-                hotel_city: typeof hotel.city === 'object' ? (hotel.city?.name || '') : (hotel.city || searchParams?.destination || ''),
-                hotel_state: hotel.state || '',
-                hotel_image: hotel.photos?.[0] || hotel.image || '',
-                apartment_type: selectedApartment.type || selectedApartment.nomenclature || '',
-                apartment_description: selectedApartment.accommodation_description || '',
-                booking_code: selectedApartment.booking_code,
-                localizador: confirmData.data.localizador,
-                check_in: searchParams?.checkIn ? format(searchParams.checkIn, 'yyyy-MM-dd') : null,
-                check_out: searchParams?.checkOut ? format(searchParams.checkOut, 'yyyy-MM-dd') : null,
-                adults: searchParams?.adults || 1,
-                children: searchParams?.children || 0,
-                total_price: selectedApartment.total_price || 0,
-                metadata: JSON.stringify({
-                  payment_bill_id: paymentResult?.bill_id || null,
-                  payment_status: paymentResult?.charge_status || null,
-                  payment_amount: paymentResult?.amount || null,
-                }),
-              }),
-            });
-          } catch (e) {
-            console.error('Erro ao salvar reserva:', e);
-          }
-
-          if (paymentResult?.bill_id) {
-            try {
-              await fetch(`/api/lp/bookings/${confirmData.data.localizador}/link-payment`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: JSON.stringify({ bill_id: paymentResult.bill_id }),
-              });
-            } catch (e) {
-              console.error('Erro ao vincular pagamento:', e);
-            }
-          }
-        } else {
-          if (paymentResult?.bill_id) {
-            try {
-              await fetch('/api/vindi/cancel-bill', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: JSON.stringify({ bill_id: paymentResult.bill_id }),
-              });
-            } catch (e) {
-              console.error('Erro ao cancelar pagamento:', e);
-            }
-          }
-          setError('Não foi possível confirmar a reserva. Seu pagamento será estornado automaticamente.');
-        }
-      } else {
-        if (paymentResult?.bill_id) {
-          try {
-            await fetch('/api/vindi/cancel-bill', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'same-origin',
-              body: JSON.stringify({ bill_id: paymentResult.bill_id }),
-            });
-          } catch (e) {
-            console.error('Erro ao cancelar pagamento:', e);
-          }
-        }
-        setError('Hospedagem indisponível. Seu pagamento será estornado automaticamente.');
+      if (!availData.ok) {
+        setError(availData.data?.mensagem || availData.error || 'Hospedagem indisponível. Tente outras datas ou outro quarto.');
+        return;
       }
+
+      setCheckingAvailability(false);
+      setConfirming(true);
+
+      const confirmRes = await fetch('/api/lp/booking-confirmation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          booking_code: apt.booking_code,
+          hotel_id: hotel.id,
+        }),
+      });
+      const confirmData = await confirmRes.json();
+      setBookingResult(confirmData);
+
+      if (!confirmData.ok || !confirmData.data?.localizador) {
+        setError(confirmData.data?.mensagem || 'Não foi possível confirmar a reserva. Tente novamente.');
+        return;
+      }
+
+      setBookingLocator(confirmData.data.localizador);
+      setStep(3);
     } catch {
-      setError('Erro ao confirmar reserva após pagamento. Entre em contato com o suporte.');
+      setError('Erro de conexão ao confirmar reserva. Tente novamente.');
     } finally {
+      setReserving(false);
       setCheckingAvailability(false);
       setConfirming(false);
     }
   };
 
+  const handleReserveAndGoToPayment = async () => {
+    await proceedWithReservation(selectedApartment);
+  };
+
+  const handlePaymentSuccess = async (paymentResult) => {
+    setError('');
+    setStep(4);
+    setPaymentCompleted(true);
+
+    if (!bookingLocator) {
+      setError('Reserva não foi confirmada antes do pagamento. Entre em contato com o suporte.');
+      return;
+    }
+
+    try {
+      await fetch('/api/lp/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          hotel_id: hotel.id,
+          hotel_name: hotel.name,
+          hotel_city: typeof hotel.city === 'object' ? (hotel.city?.name || '') : (hotel.city || searchParams?.destination || ''),
+          hotel_state: hotel.state || '',
+          hotel_image: hotel.photos?.[0] || hotel.image || '',
+          apartment_type: selectedApartment.type || selectedApartment.nomenclature || '',
+          apartment_description: selectedApartment.accommodation_description || '',
+          booking_code: selectedApartment.booking_code,
+          localizador: bookingLocator,
+          check_in: (effectiveDates?.checkIn || searchParams?.checkIn) ? format(effectiveDates?.checkIn || searchParams.checkIn, 'yyyy-MM-dd') : null,
+          check_out: (effectiveDates?.checkOut || searchParams?.checkOut) ? format(effectiveDates?.checkOut || searchParams.checkOut, 'yyyy-MM-dd') : null,
+          adults: searchParams?.adults || 1,
+          children: searchParams?.children || 0,
+          total_price: selectedApartment.total_price || 0,
+          metadata: JSON.stringify({
+            payment_bill_id: paymentResult?.bill_id || null,
+            payment_status: paymentResult?.charge_status || null,
+            payment_amount: paymentResult?.amount || null,
+          }),
+        }),
+      });
+    } catch (e) {
+      console.error('Erro ao salvar reserva:', e);
+    }
+
+    if (paymentResult?.bill_id) {
+      try {
+        await fetch(`/api/lp/bookings/${bookingLocator}/link-payment`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ bill_id: paymentResult.bill_id }),
+        });
+      } catch (e) {
+        console.error('Erro ao vincular pagamento:', e);
+      }
+    }
+  };
+
+  const handlePaymentFailure = useCallback(() => {
+    setBookingLocator(null);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
   if (!hotel) return null;
 
-  const periodStr = searchParams?.checkIn && searchParams?.checkOut
-    ? `${format(searchParams.checkIn, 'dd/MM/yyyy')} – ${format(searchParams.checkOut, 'dd/MM/yyyy')}`
+  const activeSearchParams = effectiveDates
+    ? { ...searchParams, checkIn: effectiveDates.checkIn, checkOut: effectiveDates.checkOut }
+    : searchParams;
+
+  const periodStr = activeSearchParams?.checkIn && activeSearchParams?.checkOut
+    ? `${format(activeSearchParams.checkIn, 'dd/MM/yyyy')} – ${format(activeSearchParams.checkOut, 'dd/MM/yyyy')}`
     : '';
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto p-0 gap-0 rounded-2xl border-0 shadow-2xl bg-white mx-2 sm:mx-auto">
+    <>
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !alternativesModalOpen) handleClose(); }}>
+      <DialogContent
+        className="max-w-2xl max-h-[92vh] overflow-y-auto p-0 gap-0 rounded-2xl border-0 shadow-2xl bg-white mx-2 sm:mx-auto"
+        onInteractOutside={(e) => { if (alternativesModalOpen) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (alternativesModalOpen) e.preventDefault(); }}
+        onPointerDownOutside={(e) => { if (alternativesModalOpen) e.preventDefault(); }}>
         <DialogHeader className="sr-only">
           <DialogTitle>Reservar hospedagem</DialogTitle>
           <DialogDescription>Fluxo de reserva</DialogDescription>
@@ -426,46 +471,63 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose }
           {error && !loadingApartments && (
             <div className="flex items-start gap-2.5 bg-red-50 border border-red-100 rounded-xl px-4 py-3 mb-5 animate-in fade-in slide-in-from-top-2 duration-300">
               <CircleAlert className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-red-600 leading-relaxed">{error}</p>
+              <div className="flex-1 flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-xs text-red-600 leading-relaxed">{error}</p>
+                {step === 1 && apartments.length === 0 && (
+                  <button
+                    onClick={fetchApartments}
+                    className="text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+                  >
+                    Tentar novamente
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
           <div style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
-            {step === 1 && <StepApartments apartments={apartments} loading={loadingApartments} onSelect={handleSelectApartment} />}
+            {step === 1 && <StepApartments apartments={apartments} loading={loadingApartments} onSelect={handleSelectApartment} extendedBy={extendedBy} checkOut={searchParams?.checkOut} />}
             {step === 2 && selectedApartment && (
-              <StepReview
-                apartment={selectedApartment}
-                hotel={hotel}
-                searchParams={searchParams}
-                user={user}
-                expandedPolicy={expandedPolicy}
-                setExpandedPolicy={setExpandedPolicy}
-                onConfirm={handleGoToPayment}
-                onBack={() => { setStep(1); setSelectedApartment(null); setAvailabilityResult(null); setError(''); }}
-              />
+              reserving ? (
+                <AnimatedLoader messages={BOOKING_MESSAGES} />
+              ) : (
+                <StepReview
+                  apartment={selectedApartment}
+                  hotel={hotel}
+                  searchParams={activeSearchParams}
+                  user={user}
+                  expandedPolicy={expandedPolicy}
+                  setExpandedPolicy={setExpandedPolicy}
+                  onConfirm={handleReserveAndGoToPayment}
+                  onBack={() => { setStep(1); setSelectedApartment(null); setAvailabilityResult(null); setBookingResult(null); setBookingLocator(null); setError(''); }}
+                  onUserUpdate={onUserUpdate}
+                />
+              )
             )}
             {step === 3 && (
               <PaymentFlow
                 hotel={hotel}
                 apartment={selectedApartment}
-                searchParams={searchParams}
+                searchParams={activeSearchParams}
                 user={user}
-                onClose={onClose}
-                onBack={() => { setStep(2); setError(''); }}
+                bookingLocator={bookingLocator}
+                onClose={handleClose}
+                onBack={() => { setBookingLocator(null); setStep(2); setError(''); }}
                 onPaymentSuccess={handlePaymentSuccess}
+                onPaymentFailure={handlePaymentFailure}
+                onUserUpdate={onUserUpdate}
               />
             )}
             {step === 4 && (
               <StepResult
                 apartment={selectedApartment}
                 hotel={hotel}
-                searchParams={searchParams}
+                searchParams={activeSearchParams}
                 bookingResult={bookingResult}
-                availabilityResult={availabilityResult}
-                checking={checkingAvailability}
-                confirming={confirming}
+                bookingLocator={bookingLocator}
+                paymentCompleted={paymentCompleted}
                 error={error}
-                onClose={onClose}
+                onClose={handleClose}
               />
             )}
           </div>
@@ -479,10 +541,19 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose }
         `}</style>
       </DialogContent>
     </Dialog>
+    <BookingAlternativesModal
+      open={alternativesModalOpen}
+      onClose={() => setAlternativesModalOpen(false)}
+      hotel={hotel}
+      searchParams={activeSearchParams}
+      excludeBookingCode={selectedApartment?.booking_code}
+      onSelectAlternative={handleSelectAlternative}
+    />
+    </>
   );
 }
 
-function StepApartments({ apartments, loading, onSelect }) {
+function StepApartments({ apartments, loading, onSelect, extendedBy, checkOut }) {
   if (loading) return <AnimatedLoader messages={LOADING_MESSAGES} />;
 
   if (apartments.length === 0) {
@@ -497,14 +568,28 @@ function StepApartments({ apartments, loading, onSelect }) {
     );
   }
 
+  const available = apartments;
+
+  const extendedCheckOut = extendedBy > 0 && checkOut
+    ? format(addDays(checkOut, extendedBy), 'dd/MM/yyyy')
+    : null;
+
   return (
     <div>
       <div className="mb-5">
         <h3 className="text-base font-bold text-gray-800">Escolha seu quarto</h3>
         <p className="text-xs text-gray-400 mt-0.5">{apartments.length} opção(ões) encontrada(s)</p>
       </div>
+      {extendedCheckOut && (
+        <div className="mb-4 flex items-start gap-2.5 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+          <Info className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+          <p className="text-[12px] text-blue-700 leading-relaxed">
+            Não encontramos quartos nas datas exatas. Os resultados abaixo são para checkout em <span className="font-bold">{extendedCheckOut}</span> ({extendedBy} diária{extendedBy > 1 ? 's' : ''} a mais).
+          </p>
+        </div>
+      )}
       <div className="space-y-3">
-        {apartments.map((apt, i) => (
+        {available.map((apt, i) => (
           <ApartmentCard key={apt.booking_code || i} apt={apt} onSelect={onSelect} index={i} />
         ))}
       </div>
@@ -541,13 +626,11 @@ function ApartmentCard({ apt, onSelect, index }) {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h4 className="text-sm font-bold text-gray-800">{apt.type || 'Apartamento'}</h4>
-                <span className={`text-[9px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${
-                  isAvailable
-                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
-                    : 'bg-amber-50 text-amber-600 border border-amber-200'
-                }`}>
-                  {isAvailable ? 'Disponível' : 'Sob consulta'}
-                </span>
+                {isAvailable && (
+                  <span className="text-[9px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider bg-emerald-50 text-emerald-600 border border-emerald-200">
+                    Disponível
+                  </span>
+                )}
               </div>
               {apt.nomenclature && <p className="text-[11px] text-gray-400 mt-0.5">{apt.nomenclature}</p>}
               {apt.accommodation_description && apt.accommodation_description !== apt.nomenclature && (
@@ -594,9 +677,6 @@ function ApartmentCard({ apt, onSelect, index }) {
                 <span className="text-xl font-bold text-gray-800">{formatCurrency(dailyPrice)}</span>
                 <span className="text-[10px] text-gray-400">/noite</span>
               </div>
-              {extrasPerNight > 0 && (
-                <p className="text-[9px] text-gray-400">+ R$ {formatCurrency(extrasPerNight)} adicionais/noite</p>
-              )}
               <p className="text-[10px] text-blue-500 font-bold">Total R$ {formatCurrency(apt.total_price)}</p>
             </div>
             <div className="flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[11px] font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 group-hover:shadow-blue-600/30 transition-all active:scale-[0.97]">
@@ -609,13 +689,109 @@ function ApartmentCard({ apt, onSelect, index }) {
   );
 }
 
-function StepReview({ apartment, hotel, searchParams, user, expandedPolicy, setExpandedPolicy, onConfirm, onBack }) {
+function StepReview({ apartment, hotel, searchParams, user, expandedPolicy, setExpandedPolicy, onConfirm, onBack, onUserUpdate }) {
   const cancellationText = stripHtml(apartment.policies?.cancellation || '');
   const cancellationLines = cancellationText.split('\n').filter(l => l.trim().length > 3);
   const dailyPrice = apartment.cost?.[0]?.daily || (apartment.total_price / Math.max(apartment.daily_count || 1, 1));
+
+  const checkInMonth = searchParams?.checkIn ? new Date(searchParams.checkIn).getMonth() + 1 : null;
+  const highSeasonMonths = hotel?.high_season_months || [];
+  const isHighSeason = checkInMonth ? highSeasonMonths.includes(checkInMonth) : false;
+  const crmDaily = (hotel?.category_low_rate || hotel?.category_high_rate)
+    ? parseFloat(isHighSeason ? hotel.category_high_rate : hotel.category_low_rate) || null
+    : null;
+  const apiExtras = apartment.cost?.[0]?.extras || 0;
+  const crmNoShow = crmDaily !== null ? crmDaily + apiExtras : null;
   const extrasPerNight = apartment.cost?.[0]?.extras || 0;
   const totalExtras = (apartment.cost || []).reduce((sum, c) => sum + (c.extras || 0), 0);
   const totalDailies = (apartment.cost || []).reduce((sum, c) => sum + (c.daily || 0), 0);
+  const infoExtras = Array.isArray(apartment.info_extras) ? apartment.info_extras : [];
+  const hasExtras = totalExtras > 0 || apiExtras > 0 || infoExtras.length > 0;
+  const nightsCount = apartment.daily_count || apartment.cost?.length || 1;
+
+  const hasCpf = !!(user?.cpf && user.cpf.replace(/\D/g, '').length === 11);
+  const hasBirthDate = !!(user?.birth_date);
+  const [cpfInput, setCpfInput] = useState('');
+  const [cpfError, setCpfError] = useState('');
+  const [birthDateInput, setBirthDateInput] = useState('');
+  const [birthDateError, setBirthDateError] = useState('');
+  const [savingCpf, setSavingCpf] = useState(false);
+
+  const formatCpfMask = (v) => {
+    const d = v.replace(/\D/g, '').slice(0, 11);
+    return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+            .replace(/(\d{3})(\d{3})(\d{3})/, '$1.$2.$3')
+            .replace(/(\d{3})(\d{3})/, '$1.$2')
+            .replace(/(\d{3})/, '$1');
+  };
+
+  const isValidCpfInput = (cpf) => {
+    const c = cpf.replace(/\D/g, '');
+    if (c.length !== 11 || /^(\d)\1{10}$/.test(c)) return false;
+    let sum = 0;
+    for (let i = 0; i < 9; i++) sum += parseInt(c[i]) * (10 - i);
+    let r = (sum * 10) % 11;
+    if (r === 10 || r === 11) r = 0;
+    if (r !== parseInt(c[9])) return false;
+    sum = 0;
+    for (let i = 0; i < 10; i++) sum += parseInt(c[i]) * (11 - i);
+    r = (sum * 10) % 11;
+    if (r === 10 || r === 11) r = 0;
+    return r === parseInt(c[10]);
+  };
+
+  const handleConfirmWithCpf = async () => {
+    let hasError = false;
+    if (!hasCpf) {
+      const cleaned = cpfInput.replace(/\D/g, '');
+      if (cleaned.length !== 11) { setCpfError('Informe o CPF completo (11 dígitos).'); hasError = true; }
+      else if (!isValidCpfInput(cpfInput)) { setCpfError('CPF inválido. Verifique os dígitos.'); hasError = true; }
+    }
+    if (!hasBirthDate) {
+      if (!birthDateInput) { setBirthDateError('Informe sua data de nascimento.'); hasError = true; }
+      else {
+        const age = (new Date() - new Date(birthDateInput)) / (365.25 * 24 * 3600 * 1000);
+        if (age < 18) { setBirthDateError('Você precisa ter pelo menos 18 anos.'); hasError = true; }
+        if (age > 110) { setBirthDateError('Data de nascimento inválida.'); hasError = true; }
+      }
+    }
+    if (hasError) return;
+
+    const patchBody = {};
+    if (!hasCpf) patchBody.cpf = cpfInput.replace(/\D/g, '');
+    if (!hasBirthDate) patchBody.birth_date = birthDateInput;
+
+    if (Object.keys(patchBody).length > 0) {
+      setSavingCpf(true);
+      try {
+        const res = await fetch('/api/lp/profile', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(patchBody),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          if (res.status === 409) {
+            setCpfError('__cpf_duplicado__');
+          } else if (res.status === 400) {
+            setCpfError('CPF inválido segundo nossos registros. Verifique e tente novamente.');
+          } else {
+            setCpfError('Não foi possível salvar os dados. Tente novamente.');
+          }
+          setSavingCpf(false);
+          return;
+        }
+        if (onUserUpdate) onUserUpdate({ ...user, ...(patchBody.cpf ? { cpf: patchBody.cpf } : {}), ...(patchBody.birth_date ? { birth_date: patchBody.birth_date } : {}) });
+      } catch {
+        setCpfError('Erro de conexão ao salvar dados. Tente novamente.');
+        setSavingCpf(false);
+        return;
+      }
+      setSavingCpf(false);
+    }
+    onConfirm();
+  };
 
   const formatCpf = (cpf) => {
     if (!cpf) return 'N/A';
@@ -656,12 +832,21 @@ function StepReview({ apartment, hotel, searchParams, user, expandedPolicy, setE
             <InfoItem label="Pensão" value={apartment.policies.pension.type} highlight />
           )}
         </div>
-        <div className="mt-4 pt-3 border-t border-blue-100/50 flex items-center justify-between">
-          <div>
-            <p className="text-[10px] text-blue-500 font-medium">Diária</p>
-            <p className="text-lg font-bold text-gray-800">R$ {formatCurrency(dailyPrice)}</p>
+        <div className="mt-4 pt-3 border-t border-blue-100/50">
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-[11px] text-blue-600 font-medium">Diária</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-gray-700">R$ {formatCurrency(dailyPrice)}</p>
+              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-md px-1.5 py-0.5">x{nightsCount}</span>
+            </div>
           </div>
-          <div className="text-right">
+          {infoExtras.length > 0 && infoExtras.map((ie, idx) => (
+            <div key={idx} className="flex items-center justify-between mb-1.5">
+              <p className="text-[11px] text-blue-600 font-medium">{ie.description}</p>
+              <p className="text-sm font-semibold text-gray-700">R$ {formatCurrency(ie.total_value)}</p>
+            </div>
+          ))}
+          <div className="flex items-center justify-between pt-2 mt-1 border-t border-blue-100/40">
             <p className="text-[10px] text-blue-500 font-medium">Total</p>
             <p className="text-2xl font-bold text-gray-800">R$ {formatCurrency(apartment.total_price)}</p>
           </div>
@@ -673,7 +858,55 @@ function StepReview({ apartment, hotel, searchParams, user, expandedPolicy, setE
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3">Hóspede principal</p>
           <p className="text-sm font-bold text-gray-800 mb-2">{user?.name || 'N/A'}</p>
           <div className="space-y-1.5">
-            <p className="text-xs text-gray-500 flex items-center gap-2"><CreditCard className="w-3.5 h-3.5 text-gray-300" />{formatCpf(user?.cpf)}</p>
+            {hasCpf ? (
+              <p className="text-xs text-gray-500 flex items-center gap-2"><CreditCard className="w-3.5 h-3.5 text-gray-300" />{formatCpf(user.cpf)}</p>
+            ) : (
+              <div className="mt-2">
+                <label className="text-[10px] font-bold text-red-500 uppercase tracking-wider flex items-center gap-1 mb-1">
+                  <CreditCard className="w-3 h-3" /> CPF obrigatório para reservar
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="000.000.000-00"
+                  value={cpfInput}
+                  onChange={(e) => { setCpfInput(formatCpfMask(e.target.value)); setCpfError(''); }}
+                  className={`w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 ${cpfError ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50'}`}
+                  maxLength={14}
+                />
+                {cpfError === '__cpf_duplicado__' ? (
+                  <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <p className="text-[12px] font-bold text-amber-700 flex items-center gap-1.5 mb-1">
+                      <CircleAlert className="w-3.5 h-3.5 flex-shrink-0" /> CPF já cadastrado em outra conta
+                    </p>
+                    <p className="text-[11px] text-amber-600 leading-relaxed">
+                      Este CPF está vinculado a outro cadastro. Se é seu CPF, faça login com a conta que o possui ou entre em contato com o suporte para regularizar.
+                    </p>
+                  </div>
+                ) : cpfError ? (
+                  <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1"><CircleAlert className="w-3 h-3" />{cpfError}</p>
+                ) : null}
+              </div>
+            )}
+            {!hasBirthDate && (
+              <div className="mt-2">
+                <label className="text-[10px] font-bold text-red-500 uppercase tracking-wider flex items-center gap-1 mb-1">
+                  <Calendar className="w-3 h-3" /> Data de nascimento obrigatória
+                </label>
+                <input
+                  type="date"
+                  value={birthDateInput}
+                  onChange={(e) => { setBirthDateInput(e.target.value); setBirthDateError(''); }}
+                  max={new Date(new Date().setFullYear(new Date().getFullYear() - 18)).toISOString().split('T')[0]}
+                  min="1920-01-01"
+                  className={`w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 ${birthDateError ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-gray-50'}`}
+                />
+                {birthDateError && <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1"><CircleAlert className="w-3 h-3" />{birthDateError}</p>}
+              </div>
+            )}
+            {hasBirthDate && (
+              <p className="text-xs text-gray-500 flex items-center gap-2"><Calendar className="w-3.5 h-3.5 text-gray-300" />{new Date(user.birth_date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</p>
+            )}
             {user?.email && <p className="text-xs text-gray-500 flex items-center gap-2"><Mail className="w-3.5 h-3.5 text-gray-300" />{user.email}</p>}
             {user?.phone && <p className="text-xs text-gray-500 flex items-center gap-2"><Phone className="w-3.5 h-3.5 text-gray-300" />{user.phone}</p>}
           </div>
@@ -697,12 +930,22 @@ function StepReview({ apartment, hotel, searchParams, user, expandedPolicy, setE
               <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-2">Diárias</p>
               <div className="flex gap-1 flex-wrap">
                 {apartment.cost.map((c, i) => (
-                  <div key={i} className="text-center bg-gray-50 rounded-lg py-1.5 px-2 min-w-[48px] border border-gray-100">
+                  <div key={i} className="text-center bg-gray-50 rounded-lg py-1.5 px-2 min-w-[64px] border border-gray-100">
                     <p className="text-[8px] text-gray-300 font-bold">D{i + 1}</p>
-                    <p className="text-[10px] font-bold text-gray-700">{formatCurrency(c.daily)}</p>
+                    <p className="text-[10px] font-bold text-gray-700 leading-tight">{formatCurrency(c.daily)}</p>
                   </div>
                 ))}
               </div>
+              {infoExtras.length > 0 && (
+                <div className="mt-3 pt-2 border-t border-gray-100 space-y-1">
+                  {infoExtras.map((ie, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-[10px]">
+                      <span className="text-gray-500 font-medium">{ie.description}</span>
+                      <span className="text-amber-600 font-semibold">R$ {formatCurrency(ie.total_value)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -723,19 +966,39 @@ function StepReview({ apartment, hotel, searchParams, user, expandedPolicy, setE
                   <span className="w-1 h-1 rounded-full bg-amber-300 flex-shrink-0 mt-1.5" />{line}
                 </p>
               ))}
-              {apartment.policies?.no_show && (
-                <p className="text-[11px] text-amber-700 font-bold mt-2">No-show: R$ {formatCurrency(parseFloat(apartment.policies.no_show))}</p>
-              )}
+              <div className="mt-2 pt-2 border-t border-amber-100">
+                <p className="text-[11px] text-amber-700 font-bold mb-1">No-show</p>
+                <p className="text-[11px] text-amber-600 leading-relaxed">
+                  Para saber o valor do no-show, contate nosso time pelo WhatsApp:{' '}
+                  <a
+                    href={(() => {
+                      const hotelName = hotel?.name || '';
+                      const cityState = hotel?.cityState || [typeof hotel?.city === 'object' ? hotel?.city?.name : hotel?.city, hotel?.state].filter(Boolean).join('/');
+                      const checkInStr = searchParams?.checkIn ? format(searchParams.checkIn, 'dd/MM/yyyy') : '';
+                      const checkOutStr = searchParams?.checkOut ? format(searchParams.checkOut, 'dd/MM/yyyy') : '';
+                      const msg = `Olá, preciso saber mais sobre a política de no-show da minha reserva:\nHotel: ${hotelName}${cityState ? `\nCidade/Estado: ${cityState}` : ''}${checkInStr ? `\nCheck-in: ${checkInStr}` : ''}${checkOutStr ? `\nCheck-out: ${checkOutStr}` : ''}`;
+                      return `https://wa.me/5554994576992?text=${encodeURIComponent(msg)}`;
+                    })()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold underline hover:text-amber-700"
+                  >
+                    +55 54 99457-6992
+                  </a>
+                </p>
+              </div>
             </div>
           </div>
         </div>
       )}
 
       <button
-        onClick={onConfirm}
-        className="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/35 transition-all active:scale-[0.99] text-sm ring-1 ring-white/10"
+        onClick={handleConfirmWithCpf}
+        disabled={savingCpf || (!hasCpf && cpfInput.replace(/\D/g, '').length !== 11) || (!hasBirthDate && !birthDateInput)}
+        className="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/35 transition-all active:scale-[0.99] text-sm ring-1 ring-white/10 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
       >
-        <Wallet className="w-4 h-4" /> Prosseguir para Pagamento
+        {savingCpf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />}
+        {savingCpf ? 'Salvando CPF...' : 'Prosseguir para Pagamento'}
       </button>
       <p className="text-[10px] text-gray-400 text-center mt-2.5 flex items-center justify-center gap-1">
         <Lock className="w-2.5 h-2.5" /> Ao prosseguir, você aceita as políticas de cancelamento
@@ -753,12 +1016,8 @@ function InfoItem({ label, value, highlight }) {
   );
 }
 
-function StepResult({ apartment, hotel, searchParams, bookingResult, availabilityResult, checking, confirming, error, onClose }) {
-  if (checking || confirming) {
-    return <AnimatedLoader messages={BOOKING_MESSAGES} />;
-  }
-
-  if (bookingResult?.ok) {
+function StepResult({ apartment, hotel, searchParams, bookingResult, bookingLocator, paymentCompleted, error, onClose }) {
+  if (paymentCompleted && bookingLocator && !error) {
     return (
       <div className="text-center py-6" style={{ animation: 'fadeSlideIn 0.5s ease-out' }}>
         <div className="relative mx-auto mb-5 w-20 h-20">
@@ -772,13 +1031,11 @@ function StepResult({ apartment, hotel, searchParams, bookingResult, availabilit
         <p className="text-sm text-gray-500">{hotel.name}</p>
         <p className="text-xs text-gray-400 mt-0.5">{apartment?.type || 'Apartamento'} · {apartment?.daily_count} noite(s)</p>
 
-        {bookingResult.data?.localizador && (
-          <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl px-6 py-5 max-w-xs mx-auto mt-5 mb-5 shadow-xl">
-            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-2">Seu localizador</p>
-            <p className="text-3xl font-bold text-white tracking-[0.15em] font-mono">{bookingResult.data.localizador}</p>
-            <p className="text-[10px] text-gray-500 mt-2">Guarde este código para consultas</p>
-          </div>
-        )}
+        <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl px-6 py-5 max-w-xs mx-auto mt-5 mb-5 shadow-xl">
+          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-[0.2em] mb-2">Seu localizador</p>
+          <p className="text-3xl font-bold text-white tracking-[0.15em] font-mono">{bookingLocator}</p>
+          <p className="text-[10px] text-gray-500 mt-2">Guarde este código para consultas</p>
+        </div>
 
         <div className="bg-gray-50 rounded-xl p-4 max-w-xs mx-auto mb-5 text-left space-y-2 border border-gray-100">
           <div className="flex justify-between text-xs">
@@ -808,16 +1065,16 @@ function StepResult({ apartment, hotel, searchParams, bookingResult, availabilit
     );
   }
 
-  const errorMsg = error || bookingResult?.data?.mensagem || availabilityResult?.data?.mensagem || 'Não foi possível confirmar sua reserva.';
+  const errorMsg = error || bookingResult?.data?.mensagem || 'Não foi possível concluir a reserva.';
 
   return (
     <div className="text-center py-8" style={{ animation: 'fadeSlideIn 0.5s ease-out' }}>
       <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-100">
         <AlertTriangle className="w-8 h-8 text-amber-400" />
       </div>
-      <h3 className="text-base font-bold text-gray-800 mb-1">Pagamento aprovado, mas houve um problema na reserva</h3>
+      <h3 className="text-base font-bold text-gray-800 mb-1">Não foi possível concluir o pagamento</h3>
       <p className="text-xs text-gray-500 mb-2 max-w-sm mx-auto leading-relaxed">{errorMsg}</p>
-      <p className="text-xs text-amber-600 font-medium mb-6 max-w-sm mx-auto">Seu pagamento foi processado com sucesso. Entre em contato com o suporte para finalizar sua reserva.</p>
+      <p className="text-xs text-emerald-600 font-medium mb-6 max-w-sm mx-auto">Sua reserva foi liberada e nenhum valor foi cobrado. Tente novamente com outro quarto ou outra forma de pagamento.</p>
       <button onClick={onClose} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold px-6 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all text-sm">
         Fechar
       </button>

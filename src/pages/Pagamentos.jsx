@@ -4,7 +4,7 @@ import {
   Wallet, CreditCard, FileText, Search, RefreshCw, Loader2,
   ExternalLink, ChevronLeft, ChevronRight, Filter, ChevronDown, ChevronUp,
   DollarSign, Clock, CheckCircle2, XCircle, AlertCircle, Eye,
-  Receipt, Building2, User, Calendar, Hash, ArrowUpDown
+  Receipt, Building2, User, Calendar, Hash, ArrowUpDown, QrCode
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -31,6 +31,9 @@ const STATUS_MAP = {
 const METHOD_MAP = {
   credit_card: { label: 'Cartao de Credito', icon: CreditCard },
   bank_slip: { label: 'Boleto', icon: FileText },
+  pix: { label: 'Pix', icon: QrCode },
+  pix_bank_slip: { label: 'Bolepix', icon: QrCode },
+  cartao_unyco: { label: 'Cartao Unyco', icon: CreditCard },
 };
 
 function formatCurrency(value) {
@@ -275,7 +278,9 @@ export default function Pagamentos() {
                       <SelectContent>
                         <SelectItem value="all">Todos</SelectItem>
                         <SelectItem value="credit_card">Cartao de Credito</SelectItem>
+                        <SelectItem value="pix">Pix</SelectItem>
                         <SelectItem value="bank_slip">Boleto</SelectItem>
+                        <SelectItem value="pix_bank_slip">Bolepix</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

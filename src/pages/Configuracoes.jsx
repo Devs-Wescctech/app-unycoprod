@@ -136,9 +136,6 @@ function CategoryRatesSection() {
         data.data.forEach(r => {
           vals[`${r.category_id}_low`] = String(r.low_season_rate || '');
           vals[`${r.category_id}_high`] = String(r.high_season_rate || '');
-          if (r.category_name === 'Diamante') {
-            vals[`${r.category_id}_diamante`] = String(r.low_season_rate || '');
-          }
         });
         setEditValues(vals);
       }
@@ -162,9 +159,6 @@ function CategoryRatesSection() {
         data.data.forEach(r => {
           vals[`${r.category_id}_low`] = String(r.low_season_rate || '');
           vals[`${r.category_id}_high`] = String(r.high_season_rate || '');
-          if (r.category_name === 'Diamante') {
-            vals[`${r.category_id}_diamante`] = String(r.low_season_rate || '');
-          }
         });
         setEditValues(vals);
         toast.success('Categorias sincronizadas com a API');
@@ -195,33 +189,6 @@ function CategoryRatesSection() {
       const data = await res.json();
       if (data.ok) {
         toast.success('Valores atualizados com sucesso');
-        fetchRates();
-      } else {
-        toast.error(data.error || 'Erro ao salvar');
-      }
-    } catch {
-      toast.error('Erro de conexão');
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const handleSaveDiamante = async (categoryId) => {
-    const val = parseFloat(editValues[`${categoryId}_diamante`]?.replace(',', '.') || '0');
-    if (isNaN(val) || val < 0) {
-      toast.error('Valor inválido');
-      return;
-    }
-    setSaving(categoryId);
-    try {
-      const res = await fetch(`/api/category-rates/${categoryId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ low_season_rate: val, high_season_rate: val }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        toast.success('Valor Diamante atualizado com sucesso');
         fetchRates();
       } else {
         toast.error(data.error || 'Erro ao salvar');
@@ -273,7 +240,6 @@ function CategoryRatesSection() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {rates.map(rate => {
-              const isDiamante = rate.category_name === 'Diamante';
               const colors = CATEGORY_COLORS[rate.category_name] || CATEGORY_COLORS['Silver'];
               const Icon = CATEGORY_ICONS[rate.category_name] || Sparkles;
               const hasLow = rate.low_season_rate > 0;
@@ -292,47 +258,6 @@ function CategoryRatesSection() {
                   </div>
 
                   <div className="p-4 space-y-3">
-                    {isDiamante ? (
-                      <>
-                        <div className="bg-blue-50 border border-blue-100 rounded-lg p-2.5 text-center mb-2">
-                          <p className="text-[10px] text-blue-600 font-medium">Valor único — sem distinção de temporada</p>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                            <Gem className="w-3 h-3 text-blue-500" /> Valor Diária (R$)
-                          </label>
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 font-medium">R$</span>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={editValues[`${rate.category_id}_diamante`] || ''}
-                              onChange={(e) => setEditValues(prev => ({ ...prev, [`${rate.category_id}_diamante`]: e.target.value }))}
-                              placeholder="0,00"
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
-                            />
-                          </div>
-                          {rate.low_season_rate > 0 && (
-                            <p className="flex items-center gap-1 text-[10px] text-emerald-600 mt-1">
-                              <CheckCircle2 className="w-3 h-3" /> R$ {formatCurrency(rate.low_season_rate)}/noite
-                            </p>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleSaveDiamante(rate.category_id)}
-                          disabled={saving === rate.category_id}
-                          className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-300 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
-                        >
-                          {saving === rate.category_id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Save className="w-4 h-4" />
-                          )}
-                          {saving === rate.category_id ? 'Salvando...' : 'Salvar'}
-                        </button>
-                      </>
-                    ) : (
-                      <>
                         <div>
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
                             <Snowflake className="w-3 h-3 text-blue-400" /> Baixa Temporada (R$)
@@ -396,8 +321,6 @@ function CategoryRatesSection() {
                           )}
                           {saving === rate.category_id ? 'Salvando...' : 'Salvar'}
                         </button>
-                      </>
-                    )}
                   </div>
                 </div>
               );

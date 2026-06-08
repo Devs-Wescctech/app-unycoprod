@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { MessageCircle, Plus, Zap, Power, PowerOff, Clock, Send, Pencil, Trash2, X, Loader2, ChevronDown, ChevronUp, Eye, BarChart3, CheckCircle2, AlertCircle, Copy, Check, History, Settings2, Sparkles, Phone, ArrowRight, RefreshCw, Search, Hotel, XCircle, Timer, Star, CreditCard, Coins, PartyPopper, UserCheck, Mail, GripVertical, ArrowDown, Type, Variable, Image, Smile, Bold, AlignLeft, MousePointer, GitBranch, MessageSquare, CornerDownRight, ChevronRight, PlayCircle, PauseCircle, ToggleLeft, ToggleRight, Workflow, Bot, CircleDot } from 'lucide-react';
+import { MessageCircle, Plus, Zap, Power, PowerOff, Clock, Send, Pencil, Trash2, X, Loader2, ChevronDown, ChevronUp, Eye, BarChart3, CheckCircle2, AlertCircle, Copy, Check, History, Settings2, Sparkles, Phone, ArrowRight, RefreshCw, Search, Hotel, XCircle, Timer, Star, CreditCard, Coins, PartyPopper, UserCheck, Mail, GripVertical, ArrowDown, Type, Variable, Image, Smile, Bold, AlignLeft, MousePointer, GitBranch, MessageSquare, CornerDownRight, ChevronRight, PlayCircle, PauseCircle, ToggleLeft, ToggleRight, Workflow, Bot, CircleDot, Download, Inbox } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import PageHeader from '@/components/ui/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -772,17 +772,132 @@ function TestModal({ flow, onClose, onSend, sending }) {
   );
 }
 
+function LogRow({ log }) {
+  const [expanded, setExpanded] = useState(false);
+  const isSent = log.status === 'sent';
+  return (
+    <div className={`rounded-xl border transition-colors ${isSent ? 'bg-slate-50 border-slate-100' : 'bg-red-50/60 border-red-100'}`}>
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center gap-3 p-3 text-left hover:bg-black/[0.02] rounded-xl transition-colors"
+      >
+        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isSent ? 'bg-emerald-500' : 'bg-red-500'}`} />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-slate-700 truncate">{log.phone || '—'}</p>
+          <p className="text-[10px] text-slate-400 truncate">
+            {isSent ? (log.message?.substring(0, 80) || 'Sem mensagem') : (log.error_message?.substring(0, 80) || 'Erro sem detalhes')}
+          </p>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <p className={`text-[10px] font-semibold ${isSent ? 'text-emerald-600' : 'text-red-500'}`}>
+            {isSent ? 'Enviado' : 'Erro'}
+          </p>
+          <p className="text-[10px] text-slate-400">
+            {log.created_at ? format(new Date(log.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : ''}
+          </p>
+        </div>
+        <ChevronDown className={`w-4 h-4 text-slate-300 flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-3 pb-3 pt-1 space-y-2 text-xs">
+              <div className="grid grid-cols-2 gap-2">
+                <div><span className="text-[10px] text-slate-400 uppercase tracking-wider">Telefone</span><p className="text-slate-700 font-medium">{log.phone || '—'}</p></div>
+                <div><span className="text-[10px] text-slate-400 uppercase tracking-wider">Data/Hora</span><p className="text-slate-700 font-medium">{log.created_at ? format(new Date(log.created_at), 'dd/MM/yyyy HH:mm:ss', { locale: ptBR }) : '—'}</p></div>
+              </div>
+              {log.message && (
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider">Mensagem</span>
+                  <div className="mt-1 bg-[#e5ddd5] rounded-lg p-2.5">
+                    <div className="bg-[#dcf8c6] rounded-lg p-2.5 shadow-sm text-xs whitespace-pre-wrap text-slate-800 leading-relaxed">{log.message}</div>
+                  </div>
+                </div>
+              )}
+              {!isSent && (
+                <div>
+                  <span className="text-[10px] text-red-400 uppercase tracking-wider">Mensagem de erro</span>
+                  <p className="mt-1 bg-red-100/70 border border-red-200 rounded-lg p-2.5 text-red-700 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+                    {log.error_message || 'Erro sem detalhes registrados'}
+                  </p>
+                </div>
+              )}
+              {log.metadata && Object.keys(log.metadata).length > 0 && (
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider">Metadados</span>
+                  <pre className="mt-1 bg-slate-100 rounded-lg p-2.5 text-[10px] text-slate-600 whitespace-pre-wrap break-words overflow-x-auto">{JSON.stringify(log.metadata, null, 2)}</pre>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function LogsModal({ flow, onClose }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/whatsapp/logs?flow_id=${flow.id}&limit=30`)
+    fetch(`/api/whatsapp/logs?flow_id=${flow.id}&limit=200`)
       .then(r => r.json())
       .then(d => { setLogs(d.data || []); setLoading(false); })
       .catch(() => setLoading(false));
   }, [flow.id]);
+
+  const counts = useMemo(() => ({
+    all: logs.length,
+    sent: logs.filter(l => l.status === 'sent').length,
+    error: logs.filter(l => l.status !== 'sent').length,
+  }), [logs]);
+
+  const filtered = useMemo(() => {
+    if (filter === 'sent') return logs.filter(l => l.status === 'sent');
+    if (filter === 'error') return logs.filter(l => l.status !== 'sent');
+    return logs;
+  }, [logs, filter]);
+
+  const handleExport = () => {
+    if (filtered.length === 0) return;
+    const esc = (v) => {
+      let s = v == null ? '' : String(v);
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+      return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = ['Data/Hora', 'Telefone', 'Status', 'Mensagem', 'Erro'];
+    const rows = filtered.map(l => [
+      l.created_at ? format(new Date(l.created_at), 'dd/MM/yyyy HH:mm:ss', { locale: ptBR }) : '',
+      l.phone || '',
+      l.status === 'sent' ? 'Enviado' : 'Erro',
+      l.message || '',
+      l.error_message || '',
+    ].map(esc).join(';'));
+    const csv = '\uFEFF' + [headers.join(';'), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeName = (flow.name || 'automacao').replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    a.download = `logs_${safeName}_${format(new Date(), 'yyyyMMdd_HHmm')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const TABS = [
+    { key: 'all', label: 'Todos', count: counts.all },
+    { key: 'sent', label: 'Enviados', count: counts.sent },
+    { key: 'error', label: 'Erros', count: counts.error },
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -795,37 +910,52 @@ function LogsModal({ flow, onClose }) {
             </div>
             <div>
               <h3 className="font-bold text-slate-800">Logs de Envio</h3>
-              <p className="text-xs text-slate-400">{flow.name} - {logs.length} registro(s)</p>
+              <p className="text-xs text-slate-400">{flow.name} · {counts.all} registro(s)</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg">
-            <X className="w-5 h-5 text-slate-400" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleExport}
+              disabled={filtered.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title="Exportar CSV"
+            >
+              <Download className="w-3.5 h-3.5" /> Exportar
+            </button>
+            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg">
+              <X className="w-5 h-5 text-slate-400" />
+            </button>
+          </div>
         </div>
+
+        <div className="px-4 pt-3 flex items-center gap-1.5 border-b border-slate-100 pb-3">
+          {TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setFilter(t.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                filter === t.key
+                  ? t.key === 'error' ? 'bg-red-500 text-white' : t.key === 'sent' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              {t.label}
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${filter === t.key ? 'bg-white/25' : 'bg-white'}`}>{t.count}</span>
+            </button>
+          ))}
+        </div>
+
         <div className="flex-1 overflow-auto p-4">
           {loading ? (
             <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 text-slate-400 animate-spin" /></div>
-          ) : logs.length === 0 ? (
-            <div className="text-center py-12 text-sm text-slate-400">Nenhum envio registrado</div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+              <Inbox className="w-8 h-8 mb-2" />
+              <p className="text-sm">{filter === 'error' ? 'Nenhum erro registrado' : filter === 'sent' ? 'Nenhum envio registrado' : 'Nenhum envio registrado'}</p>
+            </div>
           ) : (
             <div className="space-y-2">
-              {logs.map(log => (
-                <div key={log.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${log.status === 'sent' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-slate-700 truncate">{log.phone}</p>
-                    <p className="text-[10px] text-slate-400 truncate">{log.message?.substring(0, 80)}...</p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className={`text-[10px] font-semibold ${log.status === 'sent' ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {log.status === 'sent' ? 'Enviado' : 'Erro'}
-                    </p>
-                    <p className="text-[10px] text-slate-400">
-                      {log.created_at ? format(new Date(log.created_at), 'dd/MM HH:mm', { locale: ptBR }) : ''}
-                    </p>
-                  </div>
-                </div>
-              ))}
+              {filtered.map(log => <LogRow key={log.id} log={log} />)}
             </div>
           )}
         </div>

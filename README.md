@@ -193,7 +193,7 @@ Veja `.env.example` para a lista completa. Principais:
 - **GitHub Actions** em `.github/workflows/deploy.yml` — builda e publica imagem Docker no GHCR a cada push na `main`.
 
 ### Infraestrutura de Produção
-- **Servidor:** `appunyco.wescctech.com.br` — container Docker em `/var/www/html/app-unycoprod`.
+- **Servidor:** `unycoclub.com.br` — container Docker em `/var/www/html/app-unycoprod`.
 - **Banco:** PostgreSQL no host (fora do container), acessível em `172.17.0.1:5432`, database `unycoprod`.
 - **Secrets:** ficam em `/var/www/html/app-unycoprod/.env` (não versionado, `chmod 600`), carregado via `env_file:` no compose.
 - **Guia completo:** `scripts/deploy-guide.md`.

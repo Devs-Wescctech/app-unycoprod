@@ -4,38 +4,87 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import { createRequire } from 'module';
 import { query } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const _require = createRequire(import.meta.url);
+const compression = _require('compression');
+const swaggerUi = _require('swagger-ui-express');
+const nodemailer = _require('nodemailer');
+import { swaggerSpec } from './swagger.js';
+
 const app = express();
+app.use(compression({
+  filter: (req, res) => {
+    if (req.headers['range']) return false;
+    const type = res.getHeader('Content-Type') || '';
+    if (typeof type === 'string' && (type.startsWith('video/') || type.startsWith('audio/'))) return false;
+    return compression.filter(req, res);
+  }
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.get('/', (req, res, next) => {
-  const cookies = req.headers.cookie || '';
-  const hasLpToken = cookies.split(';').some(c => c.trim().startsWith('lp_token='));
-  if (!hasLpToken) {
-    return res.sendFile(path.join(__dirname, '../public/lp/index.html'));
-  }
-  next();
-});
-app.get('/home', (req, res) => {
-  const cookies = req.headers.cookie || '';
-  const hasLpToken = cookies.split(';').some(c => c.trim().startsWith('lp_token='));
-  if (!hasLpToken) {
-    return res.redirect(302, '/');
-  }
-  res.sendFile(path.join(__dirname, '../dist/index.html'));
-});
+app.get('/home', (req, res) => res.redirect(302, '/'));
 app.get('/lp/home', (req, res) => res.redirect(302, '/'));
 app.get('/lp/home/', (req, res) => res.redirect(302, '/'));
 app.use('/lp', express.static(path.join(__dirname, '../public/lp')));
+// Serve hero video with explicit range-request streaming (bypasses CDN caching issues)
+const VIDEO_CANDIDATES = [
+  path.join(__dirname, '../dist/hero-video.mp4'),
+  path.join(__dirname, '../public/hero-video.mp4'),
+  path.join(__dirname, '../media/hero-video.mp4'),
+];
+const HERO_VIDEO_PATH = VIDEO_CANDIDATES.find(p => fs.existsSync(p)) || VIDEO_CANDIDATES[0];
+console.log(`[VIDEO] resolved path: ${HERO_VIDEO_PATH} | exists: ${fs.existsSync(HERO_VIDEO_PATH)}`);
+
+app.get('/hero-video.mp4', (req, res) => {
+  if (!fs.existsSync(HERO_VIDEO_PATH)) {
+    console.error(`[VIDEO] arquivo não encontrado em nenhum caminho candidato`);
+    return res.status(404).send('Video not found');
+  }
+  const stat = fs.statSync(HERO_VIDEO_PATH);
+  const fileSize = stat.size;
+  const rangeHeader = req.headers['range'];
+
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (rangeHeader) {
+    const parts = rangeHeader.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + 1024 * 1024, fileSize - 1);
+    const chunkSize = end - start + 1;
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+    res.setHeader('Content-Length', chunkSize);
+    res.status(206);
+    fs.createReadStream(HERO_VIDEO_PATH, { start, end }).pipe(res);
+  } else {
+    res.setHeader('Content-Length', fileSize);
+    res.status(200);
+    fs.createReadStream(HERO_VIDEO_PATH).pipe(res);
+  }
+});
 
 const isProduction = process.env.NODE_ENV === 'production';
 
 if (isProduction) {
-  app.use(express.static(path.join(__dirname, '../dist')));
+  app.use('/assets', express.static(path.join(__dirname, '../dist/assets'), {
+    maxAge: '1y',
+    immutable: true,
+  }));
+  app.use(express.static(path.join(__dirname, '../dist'), {
+    maxAge: '0',
+    etag: true,
+    setHeaders: (res, filePath) => {
+      if (/\.(mp4|webm|ogg|mov|jpg|jpeg|png|webp|svg|gif|woff2?)$/i.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+      }
+    },
+  }));
 }
 
 let TOTVS_URL = 'coobrasturviagens179215.protheus.cloudtotvs.com.br';
@@ -182,6 +231,7 @@ async function fetchActiveUsersFromDB() {
       INNER JOIN plans p ON p.id = s.plan_id
       WHERE s.status = 'ativa'
         AND (s.ends_at IS NULL OR s.ends_at > NOW())
+        AND u.cpf IS NOT NULL AND u.cpf != ''
       ORDER BY u.id ASC
     `);
     return { rows: result.rows, plansEnabled: true };
@@ -1843,78 +1893,71 @@ app.post('/api/lp/register', async (req, res) => {
   try {
     const { name, cpf, phone, email, password, cep, address, number, bairro, cidade, estado, birth_date } = req.body;
 
-    if (!name || !cpf || !email || !password) {
-      return res.status(400).json({ success: false, error: 'Campos obrigatórios: name, cpf, email, password' });
+    if (!name || !email || !password) {
+      return res.status(400).json({ success: false, error: 'Campos obrigatórios: nome, e-mail e senha.' });
     }
 
-    const cleanCpf = (cpf || '').replace(/\D/g, '');
-
-    if (!isValidCPF(cleanCpf)) {
-      return res.status(400).json({ success: false, error: 'CPF inválido. Verifique e tente novamente.' });
+    if (!phone) {
+      return res.status(400).json({ success: false, error: 'Telefone é obrigatório.' });
     }
 
-    const existingCpf = await query(
-      "SELECT id FROM users WHERE REPLACE(REPLACE(REPLACE(cpf, '.', ''), '-', ''), '/', '') = $1",
-      [cleanCpf]
-    );
-    if (existingCpf.rows.length > 0) {
-      return res.status(400).json({ success: false, error: 'Já existe um cadastro com este CPF' });
+    const phoneDigits = String(phone).replace(/\D/g, '');
+    if (phoneDigits.length < 10) {
+      return res.status(400).json({ success: false, error: 'Telefone inválido.' });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, error: 'E-mail inválido.' });
+    }
+
+    const strongPwd = password.length >= 8 &&
+      /[A-Z]/.test(password) && /[a-z]/.test(password) &&
+      /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password);
+    if (!strongPwd) {
+      return res.status(400).json({ success: false, error: 'Senha fraca. Use pelo menos 8 caracteres com letras maiúsculas, minúsculas, números e um símbolo.' });
     }
 
     const existingEmail = await query('SELECT id FROM users WHERE email = $1', [email]);
     if (existingEmail.rows.length > 0) {
-      return res.status(400).json({ success: false, error: 'Já existe um cadastro com este E-mail' });
+      return res.status(400).json({ success: false, error: 'Já existe um cadastro com este e-mail.' });
     }
 
-    const configResult = await query("SELECT value FROM system_config WHERE key = 'plans_enabled'");
-    const plansOn = configResult.rows.length > 0 ? configResult.rows[0].value : true;
-
-    if (!plansOn) {
-      const missing = [];
-      if (!cep) missing.push('CEP');
-      if (!address) missing.push('Endereço');
-      if (!bairro) missing.push('Bairro');
-      if (!cidade) missing.push('Cidade');
-      if (!estado) missing.push('Estado');
-      if (!birth_date) missing.push('Data de nascimento');
-      if (missing.length > 0) {
-        return res.status(400).json({ success: false, error: `Campos obrigatórios: ${missing.join(', ')}` });
-      }
+    const existingPhone = await query(
+      "SELECT id FROM users WHERE REPLACE(REPLACE(REPLACE(REPLACE(phone, '(', ''), ')', ''), ' ', ''), '-', '') = $1",
+      [phoneDigits]
+    );
+    if (existingPhone.rows.length > 0) {
+      return res.status(400).json({ success: false, error: 'Já existe um cadastro com este telefone.' });
     }
 
     const result = await query(
-      `INSERT INTO users (name, cpf, phone, email, password, cep, address, numero, bairro, cidade, estado, birth_date, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()) RETURNING id`,
-      [
-        name.trim(),
-        cleanCpf,
-        phone || null,
-        email,
-        password,
-        cep || null,
-        address || null,
-        number || null,
-        bairro || null,
-        cidade || null,
-        estado || null,
-        birth_date || null,
-      ]
+      `INSERT INTO users (name, phone, email, password, created_at)
+       VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
+      [name.trim(), phone, email, password]
     );
 
     const userId = result.rows[0].id;
     const token = createLpSession(userId, name.trim());
 
-    if (!plansOn) {
+    const planCfg = await query("SELECT value FROM system_config WHERE key = 'plans_enabled'");
+    const plansEnabled = planCfg.rows.length > 0 ? planCfg.rows[0].value : true;
+
+    if (!plansEnabled) {
       try {
         if (phone) {
           triggerWhatsAppFlow('registration_completed', {
             nome: name.trim(),
           }, phone).catch(() => {});
         }
+        if (email) {
+          triggerEmailFlow('registration_completed', {
+            nome: name.trim(),
+          }, email).catch(() => {});
+        }
       } catch (e) {}
     }
 
-    const redirect = plansOn ? '/lp/checkout.html' : '/';
+    const redirect = plansEnabled ? '/lp/checkout.html' : '/';
 
     res.cookie('lp_token', token, { httpOnly: true, path: '/', sameSite: 'lax', maxAge: 86400000 });
     res.json({ success: true, user_id: userId, redirect });
@@ -1974,9 +2017,22 @@ app.get('/api/lp/session', async (req, res) => {
         [session.userId]
       );
       const subscription = subResult.rows.length > 0 ? subResult.rows[0] : null;
-      const userRow = await query('SELECT cpf, name, phone, email FROM users WHERE id = $1 LIMIT 1', [session.userId]);
+      const userRow = await query('SELECT cpf, name, phone, email, cep, address, numero, bairro, cidade, estado, birth_date FROM users WHERE id = $1 LIMIT 1', [session.userId]);
       const userData = userRow.rows[0] || {};
-      return res.json({ success: true, user: { id: session.userId, name: session.userName, cpf: userData.cpf || '', phone: userData.phone || '', email: userData.email || '' }, subscription });
+      return res.json({ success: true, user: {
+        id: session.userId,
+        name: session.userName,
+        cpf: userData.cpf || '',
+        phone: userData.phone || '',
+        email: userData.email || '',
+        cep: userData.cep || '',
+        address: userData.address || '',
+        numero: userData.numero || '',
+        bairro: userData.bairro || '',
+        cidade: userData.cidade || '',
+        estado: userData.estado || '',
+        birth_date: userData.birth_date || '',
+      }, subscription });
     }
     res.json({ success: false });
   } catch (error) {
@@ -1992,6 +2048,63 @@ app.get('/api/lp/plans', async (req, res) => {
   } catch (error) {
     console.error('[LP PLANS] Error:', error.message);
     res.status(500).json({ success: false, error: 'Erro ao consultar planos', detail: error.message });
+  }
+});
+
+app.patch('/api/lp/profile', async (req, res) => {
+  try {
+    const token = parseLpToken(req);
+    const session = getLpSession(token);
+    if (!session) return res.status(401).json({ success: false, error: 'Sessão expirada' });
+
+    const { cpf, phone, cep, address, numero, bairro, cidade, estado, birth_date } = req.body || {};
+
+    const fields = [];
+    const params = [];
+    let i = 1;
+
+    if (cpf !== undefined) {
+      const cleanCpf = String(cpf).replace(/\D/g, '');
+      if (cleanCpf && !isValidCPF(cleanCpf)) {
+        return res.status(400).json({ success: false, error: 'CPF inválido' });
+      }
+      if (cleanCpf) {
+        const exists = await query(
+          "SELECT id FROM users WHERE REPLACE(REPLACE(REPLACE(cpf, '.', ''), '-', ''), '/', '') = $1 AND id <> $2 LIMIT 1",
+          [cleanCpf, session.userId]
+        );
+        if (exists.rows.length > 0) {
+          return res.status(409).json({ success: false, error: 'CPF já cadastrado em outra conta' });
+        }
+      }
+      fields.push(`cpf = $${i++}`); params.push(cleanCpf || null);
+    }
+    if (phone !== undefined)     { fields.push(`phone = $${i++}`);     params.push(String(phone).replace(/\D/g, '') || null); }
+    if (cep !== undefined)       { fields.push(`cep = $${i++}`);       params.push(String(cep).replace(/\D/g, '') || null); }
+    if (address !== undefined)   { fields.push(`address = $${i++}`);   params.push(address || null); }
+    if (numero !== undefined)    { fields.push(`numero = $${i++}`);    params.push(numero || null); }
+    if (bairro !== undefined)    { fields.push(`bairro = $${i++}`);    params.push(bairro || null); }
+    if (cidade !== undefined)    { fields.push(`cidade = $${i++}`);    params.push(cidade || null); }
+    if (estado !== undefined)    { fields.push(`estado = $${i++}`);    params.push(estado || null); }
+    if (birth_date !== undefined){ fields.push(`birth_date = $${i++}`);params.push(birth_date || null); }
+
+    if (fields.length === 0) return res.json({ success: true });
+
+    params.push(session.userId);
+    await query(`UPDATE users SET ${fields.join(', ')} WHERE id = $${i}`, params);
+
+    const userRow = await query('SELECT cpf, name, phone, email, cep, address, numero, bairro, cidade, estado, birth_date FROM users WHERE id = $1 LIMIT 1', [session.userId]);
+    const u = userRow.rows[0] || {};
+    res.json({ success: true, user: {
+      id: session.userId, name: session.userName,
+      cpf: u.cpf || '', phone: u.phone || '', email: u.email || '',
+      cep: u.cep || '', address: u.address || '', numero: u.numero || '',
+      bairro: u.bairro || '', cidade: u.cidade || '', estado: u.estado || '',
+      birth_date: u.birth_date || '',
+    }});
+  } catch (error) {
+    console.error('[LP PROFILE] Error:', error.message);
+    res.status(500).json({ success: false, error: 'Erro ao atualizar perfil' });
   }
 });
 
@@ -2025,12 +2138,17 @@ app.post('/api/lp/checkout', async (req, res) => {
     }
 
     try {
-      const userResult = await query('SELECT name, phone FROM users WHERE id = $1', [session.userId]);
+      const userResult = await query('SELECT name, phone, email FROM users WHERE id = $1', [session.userId]);
       const u = userResult.rows[0];
       if (u?.phone) {
         triggerWhatsAppFlow('registration_completed', {
           nome: u.name || session.userName || '',
         }, u.phone).catch(() => {});
+      }
+      if (u?.email) {
+        triggerEmailFlow('registration_completed', {
+          nome: u.name || session.userName || '',
+        }, u.email).catch(() => {});
       }
     } catch(e) {}
 
@@ -2110,8 +2228,35 @@ app.post('/api/lp/hotels', async (req, res) => {
     const { cidade, uf, checkIn, checkOut, adults, children, rooms, google_place_id, cidade_id } = req.body;
 
     const childrenCount = typeof children === 'number' ? children : (Array.isArray(children) ? children.length : parseInt(children) || 0);
+
+    let resolvedPlaceId = google_place_id || '';
+
+    if (!resolvedPlaceId && cidade) {
+      console.log(`[LP HOTELS] google_place_id vazio, buscando via GetCities para "${cidade}"...`);
+      try {
+        const citiesPayload = {};
+        if (cidade) citiesPayload.cidade = cidade;
+        if (uf) citiesPayload.uf = uf;
+        const citiesRes = await fetch(`${COOBMAIS_BASE_URL}/Book/GetCities`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await ensureCoobToken()}` },
+          body: JSON.stringify(citiesPayload),
+        });
+        const citiesData = await citiesRes.json();
+        const citiesList = Array.isArray(citiesData) ? citiesData : (citiesData.data || citiesData.cities || []);
+        if (citiesList.length > 0 && citiesList[0].google_place_id) {
+          resolvedPlaceId = citiesList[0].google_place_id;
+          console.log(`[LP HOTELS] google_place_id resolvido: ${resolvedPlaceId} (${citiesList[0].city || citiesList[0].cidade || cidade})`);
+        } else {
+          console.warn(`[LP HOTELS] GetCities não retornou google_place_id para "${cidade}"`);
+        }
+      } catch (e) {
+        console.warn(`[LP HOTELS] Falha ao resolver google_place_id: ${e.message}`);
+      }
+    }
+
     const payload = {
-      google_place_id: google_place_id || '',
+      google_place_id: resolvedPlaceId,
       start_date: checkIn || '',
       end_date: checkOut || '',
       adults: Math.max(2, parseInt(adults) || 2),
@@ -2119,7 +2264,7 @@ app.post('/api/lp/hotels', async (req, res) => {
       rooms: parseInt(rooms) || 1
     };
 
-    console.log('[LP HOTELS] Payload:', JSON.stringify(payload));
+    console.log(`[LP HOTELS] cidade="${cidade}" google_place_id="${resolvedPlaceId}" payload:`, JSON.stringify(payload));
 
     const response = await fetch(`${COOBMAIS_BASE_URL}/Book/GetHotels`, {
       method: 'POST',
@@ -2169,15 +2314,14 @@ app.post('/api/lp/hotels', async (req, res) => {
 
         const lowRate = parseFloat(rate.low_season_rate) || 0;
         const highRate = parseFloat(rate.high_season_rate) || 0;
-        const isDiamante = rate.category_name === 'Diamante';
-        const appliedRate = isDiamante ? lowRate : (isHighSeason ? (highRate || lowRate) : (lowRate || highRate));
+        const appliedRate = isHighSeason ? (highRate || lowRate) : (lowRate || highRate);
 
         const h = accommodations[i];
         h.category_name = rate.category_name;
         h.category_low_rate = lowRate;
         h.category_high_rate = highRate;
         h.high_season_months = highSeasonMonths;
-        h.season_label = isDiamante ? 'Fixa' : (isHighSeason ? 'Alta' : 'Baixa');
+        h.season_label = isHighSeason ? 'Alta' : 'Baixa';
 
         if (appliedRate && appliedRate > 0) {
           h.original_total_price = h.total_price;
@@ -2189,10 +2333,577 @@ app.post('/api/lp/hotels', async (req, res) => {
       console.log('[LP HOTELS] Applied category rates to', accommodations.filter(h => h.category_name).length, 'hotels');
     }
 
+    if (checkIn && checkOut && accommodations.length > 0) {
+      const adultsNum = Math.max(2, parseInt(adults) || 2);
+      console.log(`[LP HOTELS] Verificando InfoApartment para ${accommodations.length} hotéis (datas: ${checkIn} → ${checkOut})...`);
+
+      const probeResults = await Promise.all(
+        accommodations.map(h =>
+          probeInfoApartment({ hotel_id: h.id, start_date: checkIn, end_date: checkOut, adults: adultsNum, children: childrenCount })
+            .then(r => ({ hotel: h, hasImediata: r.apartments.length > 0 }))
+            .catch(() => ({ hotel: h, hasImediata: false }))
+        )
+      );
+
+      const filtered = probeResults.filter(r => r.hasImediata).map(r => r.hotel);
+      console.log(`[LP HOTELS] InfoApartment: ${filtered.length}/${accommodations.length} hotéis com apartamentos imediata`);
+      return res.json({ ok: true, data: filtered });
+    }
+
     res.json({ ok: true, data: accommodations });
   } catch (error) {
     console.error('[LP HOTELS] Error:', error.message);
     res.status(500).json({ ok: false, error: 'Erro ao buscar hotéis', detail: error.message });
+  }
+});
+
+const COOBMAIS_UNICO_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiJBUjZtdlp6R0h5UTZaOEpUczBjOUVnOXlMbGQxTWN0WlFkNmMxbEc4MEd1Q3dnMlhmRCIsInJvbGUiOiJVc2VyIiwic2Vzc2lvblR5cGUiOiJVbmljbyIsImVudmlyb21lbnQiOiJQcm9kdWN0aW9uIiwibmJmIjoxNzc5Mzc1OTAzLCJleHAiOjE3ODIxMTE5MDMsImlhdCI6MTc3OTM3NTkwMywiaXNzIjoiYXBpcHJvZC5jb29ibWFpcyIsImF1ZCI6ImFwaXByb2QuY29vYm1haXMifQ.LDuBhGmwOPWlmqjhRKOqWiJkun17SbzPxHvC_4f-I0c';
+
+const FEATURED_CITIES = [
+  'RIO DE JANEIRO',
+  'PORTO DE GALINHAS',
+  'MACEIO',
+  'PORTO SEGURO',
+  'NATAL',
+  'FLORIANOPOLIS',
+  'BALNEARIO CAMBORIU',
+  'GRAMADO',
+  'FOZ DO IGUACU',
+  'SALVADOR',
+];
+
+async function getCityPlaceId(cidade) {
+  const r = await fetch('https://apiprod.coobmais.com.br/unico/api/Book/GetCities', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${COOBMAIS_UNICO_TOKEN}` },
+    body: JSON.stringify({ cidade }),
+  });
+  if (!r.ok) return null;
+  const list = await r.json();
+  return Array.isArray(list) && list.length > 0 ? list[0].google_place_id : null;
+}
+
+async function getFirstHotelForCity(google_place_id, cityLabel) {
+  const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const today = new Date();
+  const checkInDate = addDays(today, 30);
+  const checkInMonth = checkInDate.getMonth() + 1;
+
+  const r = await fetch('https://apiprod.coobmais.com.br/unico/api/Book/GetHotels', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${COOBMAIS_UNICO_TOKEN}` },
+    body: JSON.stringify({
+      start_date: fmt(checkInDate),
+      end_date: fmt(addDays(today, 35)),
+      adults: 1,
+      children: 0,
+      children_age: 0,
+      google_place_id,
+      qtde_linhas: 5,
+    }),
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  const h = (data.accommodations || [])[0];
+  if (!h) return null;
+
+  let dailyPrice = 0;
+  let featuredRate = null;
+
+  try {
+    const [seasonRow, allRates] = await Promise.all([
+      query('SELECT high_season_months FROM season_config WHERE id = 1'),
+      query('SELECT * FROM category_rates'),
+    ]);
+    const highSeasonMonths = seasonRow.rows[0]?.high_season_months || [1, 2, 7, 12];
+    const isHighSeason = highSeasonMonths.includes(checkInMonth);
+    if (allRates.rows.length > 0) {
+      const ratesByName = {};
+      const ratesById = {};
+      allRates.rows.forEach(r => {
+        ratesByName[r.category_name.toLowerCase()] = r;
+        ratesById[r.category_id] = r;
+      });
+      const categoryRaw = await getHotelCategory(h.id);
+      if (categoryRaw) {
+        const isNum = !isNaN(categoryRaw);
+        const rate = isNum ? ratesById[categoryRaw] : ratesByName[String(categoryRaw).toLowerCase()];
+        if (rate) {
+          featuredRate = rate;
+          const lowRate = parseFloat(rate.low_season_rate) || 0;
+          const highRate = parseFloat(rate.high_season_rate) || 0;
+          const appliedRate = isHighSeason ? (highRate || lowRate) : (lowRate || highRate);
+          console.log(`[FEATURED HOTELS] ${cityLabel}: categoria "${rate.category_name}" → R$${appliedRate} (${isHighSeason ? 'Alta' : 'Baixa'} temporada)`);
+          dailyPrice = appliedRate;
+        } else {
+          console.warn(`[FEATURED HOTELS] ${cityLabel}: categoria "${categoryRaw}" não encontrada em category_rates`);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[FEATURED HOTELS] Erro ao aplicar category_rates:', e.message);
+  }
+
+  return {
+    id: h.id,
+    name: h.name || '',
+    image: h.image || '',
+    city: h.city?.name || cityLabel,
+    state: h.state || '',
+    cityState: h.city?.name ? `${h.city.name}${h.state ? ' - ' + h.state : ''}` : cityLabel,
+    daily_price: dailyPrice,
+    low_season_rate: featuredRate ? parseFloat(featuredRate.low_season_rate) || 0 : 0,
+    high_season_rate: featuredRate ? parseFloat(featuredRate.high_season_rate) || 0 : 0,
+    category_name: featuredRate?.category_name || null,
+  };
+}
+
+let featuredHotelsCache = { data: null, ts: 0 };
+const FEATURED_HOTELS_TTL = 24 * 60 * 60 * 1000;
+
+const SERP_API_KEY = process.env.SERP_API_KEY;
+
+function toTitleCase(str) {
+  return str.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
+}
+
+function getMedian(arr) {
+  if (!arr || !arr.length) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+// Considera comparável a um hotel Unyco: hotel real (não aluguel de temporada/flat) com classe >= 3 estrelas
+function isComparableHotel(p) {
+  const cls = p.extracted_hotel_class;
+  return p.type === 'hotel' && typeof cls === 'number' && cls >= 3;
+}
+
+function collectSerpPrices(data) {
+  const prices = [];
+  const push = (v) => { if (typeof v === 'number' && v > 0) prices.push(v); };
+
+  if (Array.isArray(data.properties)) {
+    // Filtra para hotéis comparáveis (exclui flats/aluguéis de temporada/hostels que distorcem a mediana).
+    // Fallback para todas as propriedades se houver poucos hotéis comparáveis.
+    const comparable = data.properties.filter(isComparableHotel);
+    const useList = comparable.length >= 3 ? comparable : data.properties;
+    useList.forEach(p => {
+      push(p.extracted_price);
+      push(p.rate_per_night?.extracted_lowest);
+    });
+  }
+  push(data.rate_per_night?.extracted_lowest);
+  (data.rooms || []).forEach(r => push(r.rate_per_night?.extracted_lowest));
+  (data.prices || []).forEach(p => push(p.rate_per_night?.extracted_lowest));
+  (data.featured_prices || []).forEach(fp => {
+    push(fp.rate_per_night?.extracted_lowest);
+    (fp.rooms || []).forEach(room => {
+      push(room.rate_per_night?.extracted_lowest);
+      (room.rates || []).forEach(rate => push(rate.rate_per_night?.extracted_lowest));
+    });
+  });
+  return prices;
+}
+
+function collectSerpPricesBySource(data) {
+  const bySource = new Map();
+  const push = (source, v) => {
+    if (typeof v === 'number' && v > 0 && source) {
+      const cur = bySource.get(source);
+      if (cur === undefined || v > cur) bySource.set(source, v);
+    }
+  };
+
+  (data.prices || []).forEach(p => {
+    push(p.source, p.rate_per_night?.extracted_lowest);
+  });
+
+  (data.featured_prices || []).forEach(fp => {
+    (fp.rooms || []).forEach(room => {
+      (room.rates || []).forEach(rate => {
+        push(rate.source, rate.rate_per_night?.extracted_lowest);
+      });
+    });
+  });
+
+  if (Array.isArray(data.properties)) {
+    data.properties.forEach(p => {
+      if (p.source) push(p.source, p.extracted_price || p.rate_per_night?.extracted_lowest);
+    });
+  }
+
+  return bySource;
+}
+
+async function fetchSerpPrices(query, checkIn, checkOut, adults = 2) {
+  const url = new URL('https://serpapi.com/search.json');
+  url.searchParams.set('engine', 'google_hotels');
+  url.searchParams.set('q', query);
+  url.searchParams.set('check_in_date', checkIn);
+  url.searchParams.set('check_out_date', checkOut);
+  url.searchParams.set('adults', String(adults));
+  url.searchParams.set('children', '0');
+  url.searchParams.set('currency', 'BRL');
+  url.searchParams.set('gl', 'br');
+  url.searchParams.set('hl', 'pt-br');
+  url.searchParams.set('api_key', SERP_API_KEY);
+  const resp = await fetch(url.toString(), { signal: AbortSignal.timeout(12000) });
+  if (!resp.ok) throw new Error(`SerpAPI ${resp.status}`);
+  const data = await resp.json();
+
+  const prices = collectSerpPrices(data);
+  const bySource = collectSerpPricesBySource(data);
+
+  return {
+    median: prices.length ? Math.round(getMedian(prices)) : null,
+    min: prices.length ? Math.round(Math.min(...prices)) : null,
+    max: prices.length ? Math.round(Math.max(...prices)) : null,
+    count: prices.length,
+    bySource,
+  };
+}
+
+const marketPricesByDate = new Map();
+const MARKET_PRICES_TTL = 24 * 60 * 60 * 1000;
+const serpSearchCache = new Map();
+const SERP_SEARCH_TTL = 60 * 60 * 1000;
+const serpMarketCache = new Map();
+const SERP_MARKET_TTL = 6 * 60 * 60 * 1000;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function buildDateWindow(monthOffset, day) {
+  const today = new Date();
+  const ci = new Date(today.getFullYear(), today.getMonth() + monthOffset, day || today.getDate());
+  const co = new Date(ci);
+  co.setDate(co.getDate() + 5);
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const ptBR = d => `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  return { checkIn: iso(ci), checkOut: iso(co), checkInBR: ptBR(ci), checkOutBR: ptBR(co), month: ci.getMonth() + 1 };
+}
+
+// Janelas de ALTA temporada (próximos meses de pico), dia 20 para pegar feriados/férias.
+// É quando a tarifa fixa Unyco realmente economiza vs. o mercado — base do comparativo de preços.
+function highSeasonWindows(highMonths) {
+  const curMonth = new Date().getMonth() + 1;
+  const offsets = [];
+  for (let o = 1; o <= 12; o++) {
+    const m = ((curMonth - 1 + o) % 12) + 1;
+    if (highMonths.includes(m)) offsets.push(o);
+  }
+  return offsets.map(o => buildDateWindow(o, 20));
+}
+
+const FALLBACK_MONTH_OFFSETS = [2, 1, 3, 4, 6, 5];
+
+app.get('/api/lp/market-prices', async (req, res) => {
+  const primaryDates = buildDateWindow(2);
+
+  // Só reaproveita cache que tenha ao menos um hotel VISÍVEL (não-hidden) com preço.
+  // Um blob antigo onde tudo ficou oculto (estratégia anterior) é descartado para forçar recomputo e auto-correção.
+  const hasVisible = (arr) => Array.isArray(arr) && arr.some(d => d.marketPrice && !d.hidden);
+
+  const mem = marketPricesByDate.get('current');
+  if (mem && Date.now() - mem.ts < MARKET_PRICES_TTL && hasVisible(mem.data)) {
+    return res.json({ ok: true, data: mem.data, cached: 'memory' });
+  }
+
+  try {
+    const dbRow = await query("SELECT value, updated_at FROM system_config WHERE key = 'market_prices_cache'");
+    if (dbRow.rows.length > 0 && dbRow.rows[0].value?.data) {
+      const cachedAt = new Date(dbRow.rows[0].updated_at).getTime();
+      const age = Date.now() - cachedAt;
+      if (age < SNAPSHOT_TTL_MS && hasVisible(dbRow.rows[0].value.data)) {
+        marketPricesByDate.set('current', { data: dbRow.rows[0].value.data, ts: Date.now() });
+        console.log(`[MARKET PRICES] DB blob hit (${Math.round(age / 86400000)}d old)`);
+        return res.json({ ok: true, data: dbRow.rows[0].value.data, cached: 'db' });
+      }
+    }
+  } catch (e) {
+    console.warn('[MARKET PRICES] DB cache read error:', e.message);
+  }
+
+  if (!featuredHotelsCache.data || !featuredHotelsCache.data.length) {
+    try {
+      console.log('[MARKET PRICES] Featured cache vazio, carregando hotéis...');
+      const loaded = await Promise.all(
+        FEATURED_CITIES.map(async (cidade) => {
+          const placeId = await getCityPlaceId(cidade);
+          if (!placeId) return null;
+          return getFirstHotelForCity(placeId, cidade);
+        })
+      );
+      const featured = loaded.filter(Boolean);
+      if (featured.length > 0) featuredHotelsCache = { data: featured, ts: Date.now() };
+      else return res.json({ ok: false, error: 'Não foi possível carregar hotéis em destaque' });
+    } catch (e) {
+      return res.json({ ok: false, error: 'Erro ao carregar hotéis: ' + e.message });
+    }
+  }
+
+  let highMonths = [1, 2, 7, 12];
+  try {
+    const r = await query('SELECT high_season_months FROM season_config WHERE id = 1');
+    if (r.rows[0]?.high_season_months?.length) highMonths = r.rows[0].high_season_months;
+  } catch {}
+
+  // Comparativo prioriza ALTA temporada (quando a tarifa fixa Unyco economiza de fato);
+  // se nenhuma janela de alta retornar preço, cai para os offsets genéricos como último recurso.
+  const seasonWindows = highSeasonWindows(highMonths);
+  const fallbackWindows = FALLBACK_MONTH_OFFSETS.map(o => buildDateWindow(o));
+  const windowsToTry = seasonWindows.length ? [...seasonWindows, ...fallbackWindows] : fallbackWindows;
+
+  console.log(`[MARKET PRICES] Janelas de alta temporada: ${seasonWindows.map(w => w.checkIn).join(', ') || '(nenhuma)'}`);
+
+  const results = [];
+  for (const hotel of featuredHotelsCache.data) {
+      const q = `${toTitleCase(hotel.city)}, Brasil`;
+
+      let marketPrice = null;
+      let usedDates = windowsToTry[0] || primaryDates;
+      let serpCount = 0;
+      let serpBySource = new Map();
+      let chosenSerp = null;
+
+      for (const win of windowsToTry) {
+        const cKey = `${q}|${win.checkIn}`;
+        const cached = serpMarketCache.get(cKey);
+        if (cached && Date.now() - cached.ts < SERP_MARKET_TTL) {
+          const serp = cached.data;
+          if (serp.median || serp.max) {
+            marketPrice = serp.median || serp.max;
+            serpCount = serp.count;
+            usedDates = win;
+            serpBySource = serp.bySource || new Map();
+            chosenSerp = serp;
+            console.log(`[MARKET PRICES] ✓ Cache (${win.checkIn}): R$${marketPrice}`);
+            break;
+          }
+          continue;
+        }
+        try {
+          console.log(`[MARKET PRICES] SerpAPI: ${q} | ${win.checkIn} → ${win.checkOut}`);
+          await sleep(600);
+          const serp = await fetchSerpPrices(q, win.checkIn, win.checkOut, 2);
+          serpMarketCache.set(cKey, { data: serp, ts: Date.now() });
+          if (serp.median || serp.max) {
+            marketPrice = serp.median || serp.max;
+            serpCount = serp.count;
+            usedDates = win;
+            serpBySource = serp.bySource || new Map();
+            chosenSerp = serp;
+            console.log(`[MARKET PRICES] ✓ Preço encontrado (${win.checkIn}): R$${marketPrice} | fontes: ${[...serpBySource.keys()].join(', ')}`);
+            break;
+          }
+        } catch (e) {
+          console.warn(`[MARKET PRICES] ${win.checkIn} erro: ${e.message}`);
+          if (e.message.includes('429')) break;
+        }
+      }
+
+      const isHigh = highMonths.includes(usedDates.month);
+      const unycoRaw = isHigh
+        ? (hotel.high_season_rate || hotel.low_season_rate || null)
+        : (hotel.low_season_rate || hotel.high_season_rate || null);
+      const unycoPrice = unycoRaw ? Math.round(unycoRaw) : null;
+
+      const hideFromFeatured = !!(unycoPrice && marketPrice && marketPrice < unycoPrice);
+      if (hideFromFeatured) {
+        console.log(`[MARKET PRICES] Ocultando ${hotel.city} — Unyco (R$${unycoPrice}) > concorrente (R$${marketPrice})`);
+      }
+
+      // Build per-source prices for comparison section — only sources more expensive than Unyco
+      const sourcePrices = [];
+      if (unycoPrice) {
+        // Always include a "Google Hotels" entry using the overall max
+        if (marketPrice && marketPrice > unycoPrice) {
+          sourcePrices.push({ source: 'Google Hotels', price: marketPrice });
+        }
+        // Add individual OTA sources from bySource (skip if already captured as max or if cheaper)
+        for (const [source, price] of serpBySource.entries()) {
+          const rp = Math.round(price);
+          if (rp > unycoPrice && source !== 'Google Hotels') {
+            // avoid duplicating what's already the max
+            if (rp !== marketPrice || !sourcePrices.find(s => s.source === 'Google Hotels')) {
+              sourcePrices.push({ source, price: rp });
+            }
+          }
+        }
+        // Sort by price desc, cap at 4 sources
+        sourcePrices.sort((a, b) => b.price - a.price);
+        sourcePrices.splice(4);
+      }
+
+      // Persiste snapshot por cidade (30 dias) para o card verde reaproveitar sem chamar SerpAPI
+      if (chosenSerp && (chosenSerp.median || chosenSerp.max) && hotel.city) {
+        try {
+          await query(
+            `INSERT INTO market_price_snapshots (city, month, median_price, max_price, count, updated_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())
+             ON CONFLICT (city, month) DO UPDATE SET median_price=$3, max_price=$4, count=$5, updated_at=NOW()`,
+            [normalizeCity(hotel.city), usedDates.month, chosenSerp.median || null, chosenSerp.max || null, chosenSerp.count || 0]
+          );
+        } catch (e) {
+          console.warn('[MARKET PRICES] snapshot write error:', e.message);
+        }
+      }
+
+      results.push({
+        ...(!hideFromFeatured ? {} : { hidden: true }),
+        ...hotel,
+        unycoPrice,
+        marketPrice,
+        marketCount: serpCount,
+        marketSource: 'SerpAPI Google Hotels',
+        checkIn: usedDates.checkIn,
+        checkOut: usedDates.checkOut,
+        checkInBR: usedDates.checkInBR,
+        checkOutBR: usedDates.checkOutBR,
+        marketLow: marketPrice,
+        marketHigh: marketPrice,
+        marketMedian: marketPrice,
+        sourcePrices,
+      });
+  }
+
+  if (results.some(r => r.marketPrice)) {
+    marketPricesByDate.set('current', { data: results, ts: Date.now() });
+    try {
+      await query(
+        `INSERT INTO system_config (key, value, updated_at) VALUES ('market_prices_cache', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+        [JSON.stringify({ data: results })]
+      );
+      console.log('[MARKET PRICES] DB blob persistido');
+    } catch (e) {
+      console.warn('[MARKET PRICES] DB cache write error:', e.message);
+    }
+  }
+  console.log('[MARKET PRICES] Done. Hotels com preço:', results.filter(r => r.marketPrice).length);
+  res.json({ ok: true, data: results });
+});
+
+function extractCityFromQuery(q) {
+  return q.split(',')[0].trim().toLowerCase();
+}
+
+function normalizeCity(s) {
+  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function buildMonthSampleDates(month) {
+  const year = new Date().getFullYear();
+  const targetYear = month < new Date().getMonth() + 1 ? year + 1 : year;
+  const ci = `${targetYear}-${String(month).padStart(2, '0')}-10`;
+  const co = `${targetYear}-${String(month).padStart(2, '0')}-15`;
+  return { ci, co };
+}
+
+const SNAPSHOT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+app.get('/api/lp/serp-prices', async (req, res) => {
+  const { q, check_in_date, check_out_date, adults = '2' } = req.query;
+  if (!q || !check_in_date || !check_out_date) {
+    return res.status(400).json({ ok: false, error: 'q, check_in_date, check_out_date obrigatórios' });
+  }
+
+  const city = normalizeCity(extractCityFromQuery(q));
+  const month = parseInt((check_in_date || '').split('-')[1]) || new Date().getMonth() + 1;
+  const memKey = `${city}|${month}`;
+
+  const memCached = serpSearchCache.get(memKey);
+  if (memCached && Date.now() - memCached.ts < SERP_SEARCH_TTL) {
+    return res.json({ ok: true, data: memCached.data, cached: 'memory' });
+  }
+
+  try {
+    const dbRow = await query(
+      'SELECT median_price, max_price, count, updated_at FROM market_price_snapshots WHERE city = $1 AND month = $2',
+      [city, month]
+    );
+    if (dbRow.rows.length > 0) {
+      const row = dbRow.rows[0];
+      const age = Date.now() - new Date(row.updated_at).getTime();
+      if (age < SNAPSHOT_TTL_MS) {
+        const data = { median: parseFloat(row.median_price) || null, max: parseFloat(row.max_price) || null, count: row.count };
+        serpSearchCache.set(memKey, { data, ts: Date.now() });
+        console.log(`[SERP PRICES] DB snapshot hit: ${city} mês ${month} (${Math.round(age / 86400000)}d old)`);
+        return res.json({ ok: true, data, cached: 'db' });
+      }
+    }
+
+    const { ci, co } = buildMonthSampleDates(month);
+    console.log(`[SERP PRICES] Fetching SerpAPI: "${q}" | datas amostra: ${ci} → ${co}`);
+    const data = await fetchSerpPrices(q, ci, co, parseInt(adults) || 2);
+
+    await query(
+      `INSERT INTO market_price_snapshots (city, month, median_price, max_price, count, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (city, month) DO UPDATE SET median_price=$3, max_price=$4, count=$5, updated_at=NOW()`,
+      [city, month, data.median || null, data.max || null, data.count || 0]
+    );
+    serpSearchCache.set(memKey, { data, ts: Date.now() });
+    res.json({ ok: true, data });
+  } catch (e) {
+    console.error('[SERP PRICES] Error:', e.message);
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+app.post('/api/admin/market-prices/refresh', async (req, res) => {
+  const cities = req.body?.cities || FEATURED_CITIES.map(c => c.toLowerCase());
+  const months = req.body?.months || [1,2,3,4,5,6,7,8,9,10,11,12];
+  const results = [];
+  let success = 0, failed = 0;
+
+  for (const city of cities) {
+    for (const month of months) {
+      const { ci, co } = buildMonthSampleDates(month);
+      const cityKey = normalizeCity(city);
+      const q = toTitleCase(city) + ', Brasil';
+      try {
+        const data = await fetchSerpPrices(q, ci, co, 2);
+        await query(
+          `INSERT INTO market_price_snapshots (city, month, median_price, max_price, count, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW())
+           ON CONFLICT (city, month) DO UPDATE SET median_price=$3, max_price=$4, count=$5, updated_at=NOW()`,
+          [cityKey, month, data.median || null, data.max || null, data.count || 0]
+        );
+        serpSearchCache.set(`${cityKey}|${month}`, { data, ts: Date.now() });
+        results.push({ city, month, ok: true, median: data.median });
+        success++;
+      } catch (e) {
+        results.push({ city, month, ok: false, error: e.message });
+        failed++;
+      }
+    }
+  }
+
+  console.log(`[SERP REFRESH] Done: ${success} ok, ${failed} failed`);
+  res.json({ ok: true, success, failed, results });
+});
+
+app.get('/api/lp/featured-hotels', async (req, res) => {
+  if (featuredHotelsCache.data && Date.now() - featuredHotelsCache.ts < FEATURED_HOTELS_TTL) {
+    return res.json({ ok: true, data: featuredHotelsCache.data, cached: true });
+  }
+  try {
+    const results = await Promise.all(
+      FEATURED_CITIES.map(async (cidade) => {
+        const placeId = await getCityPlaceId(cidade);
+        if (!placeId) { console.warn('[FEATURED HOTELS] No place_id for', cidade); return null; }
+        return getFirstHotelForCity(placeId, cidade);
+      })
+    );
+    const featured = results.filter(Boolean);
+    if (featured.length > 0) featuredHotelsCache = { data: featured, ts: Date.now() };
+    console.log('[FEATURED HOTELS] Returning', featured.length, 'hotels');
+    res.json({ ok: true, data: featured });
+  } catch (error) {
+    console.error('[FEATURED HOTELS] Error:', error.message);
+    res.json({ ok: true, data: [] });
   }
 });
 
@@ -2281,12 +2992,127 @@ app.get('/api/lp/hotel-info', async (req, res) => {
   }
 });
 
+// Helpers para alternativas de reserva
+function parseDDMMYYYY(s) {
+  const [d, m, y] = String(s).split('/').map(Number);
+  return new Date(y, m - 1, d);
+}
+function formatDDMMYYYY(date) {
+  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  return `${d}/${m}/${date.getFullYear()}`;
+}
+function addDaysDate(date, n) {
+  const r = new Date(date);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
+async function probeInfoApartment({ hotel_id, start_date, end_date, adults, children }) {
+  const payload = {
+    hotel_id: parseInt(hotel_id),
+    start_date,
+    end_date,
+    adults: Math.max(2, parseInt(adults) || 2),
+    children: parseInt(children) || 0,
+  };
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20000);
+    const response = await fetch(`${COOBMAIS_BASE_URL}/Book/InfoApartment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${await ensureCoobToken()}`,
+      },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!response.ok) return { apartments: [] };
+    const data = await response.json();
+    const list = Array.isArray(data) ? data : (data?.apartments || data?.data || []);
+    const apartments = list.map(item => item.apartment || item).filter(a => a && a.availability === 'imediata');
+    return { apartments };
+  } catch (e) {
+    return { apartments: [], error: e.message };
+  }
+}
+
+app.post('/api/lp/booking-alternatives', async (req, res) => {
+  try {
+    const { hotel_id, start_date, end_date, adults, children, exclude_booking_code } = req.body;
+    if (!hotel_id || !start_date || !end_date) {
+      return res.status(400).json({ ok: false, error: 'hotel_id, start_date e end_date são obrigatórios' });
+    }
+
+    const startD = parseDDMMYYYY(start_date);
+    const endD = parseDDMMYYYY(end_date);
+    const nights = Math.max(1, Math.round((endD - startD) / 86400000));
+
+    console.log(`[LP BOOKING-ALTERNATIVES] hotel_id:${hotel_id} ${start_date} -> ${end_date} (${nights}n) excluding:${exclude_booking_code || '-'}`);
+
+    const buildItems = (apts, sd, ed, reason, diff) =>
+      (apts || [])
+        .filter(a => a && a.availability !== 'sob_consulta' && a.booking_code !== exclude_booking_code)
+        .map(a => {
+          const itemNights = Math.max(1, Math.round((parseDDMMYYYY(ed) - parseDDMMYYYY(sd)) / 86400000));
+          return {
+            apt: a,
+            start_date: sd,
+            end_date: ed,
+            nights: itemNights,
+            reason,
+            diff,
+          };
+        });
+
+    const waveA = probeInfoApartment({ hotel_id, start_date, end_date, adults, children })
+      .then(r => buildItems(r.apartments, start_date, end_date, 'other_room', 0));
+
+    const waveB = Promise.all([1, 2, 3].map(extra => {
+      const newEnd = formatDDMMYYYY(addDaysDate(endD, extra));
+      return probeInfoApartment({ hotel_id, start_date, end_date: newEnd, adults, children })
+        .then(r => buildItems(r.apartments, start_date, newEnd, 'extend_nights', extra));
+    })).then(arrs => arrs.flat());
+
+    const waveC = Promise.all([-2, -1, 1, 2].map(shift => {
+      const newStart = formatDDMMYYYY(addDaysDate(startD, shift));
+      const newEnd = formatDDMMYYYY(addDaysDate(endD, shift));
+      return probeInfoApartment({ hotel_id, start_date: newStart, end_date: newEnd, adults, children })
+        .then(r => buildItems(r.apartments, newStart, newEnd, 'shift_dates', shift));
+    })).then(arrs => arrs.flat());
+
+    const [aRes, bRes, cRes] = await Promise.all([waveA, waveB, waveC]);
+
+    // Preferência: A (mesma data, outro quarto) > B (estender) > C (mudar data)
+    const all = [...aRes, ...bRes, ...cRes];
+    const seen = new Set();
+    const alternatives = [];
+    for (const item of all) {
+      const key = `${item.apt.booking_code}-${item.start_date}-${item.end_date}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      alternatives.push(item);
+      if (alternatives.length >= 6) break;
+    }
+
+    console.log(`[LP BOOKING-ALTERNATIVES] waveA:${aRes.length} waveB:${bRes.length} waveC:${cRes.length} -> ${alternatives.length} sugestões`);
+
+    res.json({
+      ok: true,
+      original: { start_date, end_date, nights },
+      alternatives,
+      counts: { waveA: aRes.length, waveB: bRes.length, waveC: cRes.length },
+    });
+  } catch (error) {
+    console.error('[LP BOOKING-ALTERNATIVES] Error:', error.message);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar alternativas', detail: error.message });
+  }
+});
+
 app.post('/api/lp/info-apartment', async (req, res) => {
   try {
-    const token = parseLpToken(req);
-    const session = getLpSession(token);
-    if (!session) return res.status(401).json({ ok: false, error: 'Sessão expirada' });
-
     const { hotel_id, start_date, end_date, adults, children, children_age } = req.body;
     if (!hotel_id || !start_date || !end_date) {
       return res.status(400).json({ ok: false, error: 'hotel_id, start_date e end_date são obrigatórios' });
@@ -2294,42 +3120,86 @@ app.post('/api/lp/info-apartment', async (req, res) => {
 
     console.log('[LP INFO-APARTMENT] hotel_id:', hotel_id, 'dates:', start_date, '-', end_date);
 
-    const response = await fetch(`${COOBMAIS_BASE_URL}/Book/InfoApartment`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await ensureCoobToken()}`
-      },
-      body: JSON.stringify({
-        hotel_id: parseInt(hotel_id),
-        start_date,
-        end_date,
-        adults: Math.max(2, parseInt(adults) || 2),
-        children: parseInt(children) || 0,
-        children_age: parseInt(children_age) || 0
-      })
+    const payload = {
+      hotel_id: parseInt(hotel_id),
+      start_date,
+      end_date,
+      adults: Math.max(2, parseInt(adults) || 2),
+      children: parseInt(children) || 0,
+      // children_age: comentado temporariamente — Coobmais retorna 400 quando enviado como array
+      // children_age: Array.isArray(children_age)
+      //   ? children_age.map(a => parseInt(a) || 0).join(',')
+      //   : (children_age != null ? String(parseInt(children_age) || 0) : '')
+    };
+
+    console.log('[LP INFO-APARTMENT] Payload enviado:', JSON.stringify(payload));
+    console.log('[LP INFO-APARTMENT] URL:', `${COOBMAIS_BASE_URL}/Book/InfoApartment`);
+
+    const MAX_DURATION_MS = 60000;
+    const RETRY_INTERVAL_MS = 3000;
+    const deadline = Date.now() + MAX_DURATION_MS;
+    let attempt = 0;
+    let lastStatus = null;
+    let lastError = null;
+    let lastRawText = null;
+
+    while (Date.now() < deadline) {
+      attempt++;
+      try {
+        const response = await fetch(`${COOBMAIS_BASE_URL}/Book/InfoApartment`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${await ensureCoobToken()}`
+          },
+          body: JSON.stringify(payload),
+        });
+
+        lastStatus = response.status;
+        const rawText = await response.text();
+        lastRawText = rawText;
+
+        let data;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          console.log(`[LP INFO-APARTMENT] Tentativa ${attempt} status ${response.status} - resposta não-JSON:`, rawText.substring(0, 120));
+          lastError = rawText.toLowerCase().includes('não localizado')
+            ? 'Apartamentos não disponíveis para esta configuração de hóspedes. Tente com pelo menos 2 adultos.'
+            : (rawText || 'Hotel não encontrado na Coobmais');
+        }
+
+        if (response.ok && data) {
+          const rawList = Array.isArray(data) ? data : (data?.apartments || data?.data || []);
+          const list = rawList.map(item => item.apartment || item).filter(a => a && a.availability === 'imediata');
+          if (list.length > 0) {
+            console.log(`[LP INFO-APARTMENT] Sucesso na tentativa ${attempt} - Apartamentos imediata: ${list.length} (total raw: ${rawList.length})`);
+            return res.json({ ok: true, data: list, attempts: attempt });
+          }
+          console.log(`[LP INFO-APARTMENT] Tentativa ${attempt} status 200 - nenhum com availability=imediata (raw: ${rawList.length}), retentando...`);
+          lastError = 'Nenhum apartamento com disponibilidade imediata para este hotel nas datas selecionadas.';
+        } else if (!response.ok && data) {
+          lastError = data?.message || data?.error || `Erro ${response.status} ao buscar apartamentos na Coobmais`;
+          console.log(`[LP INFO-APARTMENT] Tentativa ${attempt} status ${response.status} - erro:`, lastError);
+          console.log(`[LP INFO-APARTMENT] Corpo bruto da Coobmais:`, rawText.substring(0, 500));
+        }
+      } catch (fetchErr) {
+        lastError = fetchErr.message;
+        console.warn(`[LP INFO-APARTMENT] Tentativa ${attempt} falhou:`, fetchErr.message);
+      }
+
+      const remaining = deadline - Date.now();
+      if (remaining <= RETRY_INTERVAL_MS) break;
+      await new Promise(r => setTimeout(r, RETRY_INTERVAL_MS));
+    }
+
+    console.warn(`[LP INFO-APARTMENT] Esgotadas ${attempt} tentativas em ${MAX_DURATION_MS}ms. Último status: ${lastStatus}`);
+    return res.json({
+      ok: false,
+      error: lastError || 'Não foi possível obter apartamentos da Coobmais após 60 segundos. Clique em "Tentar novamente".',
+      attempts: attempt,
+      lastStatus,
     });
-
-    const rawText = await response.text();
-    let data;
-    try {
-      data = JSON.parse(rawText);
-    } catch {
-      console.log('[LP INFO-APARTMENT] Non-JSON response:', rawText.substring(0, 200));
-      const friendlyMsg = rawText.toLowerCase().includes('não localizado')
-        ? 'Apartamentos não disponíveis para esta configuração de hóspedes. Tente com pelo menos 2 adultos.'
-        : (rawText || 'Hotel não encontrado na Coobmais');
-      return res.json({ ok: false, error: friendlyMsg });
-    }
-
-    console.log('[LP INFO-APARTMENT] Status:', response.status, 'Apartments:', Array.isArray(data) ? data.length : 'N/A');
-
-    if (!response.ok) {
-      const errMsg = data?.message || data?.error || 'Erro ao buscar apartamentos na Coobmais';
-      return res.json({ ok: false, error: errMsg });
-    }
-
-    res.json({ ok: true, data });
   } catch (error) {
     console.error('[LP INFO-APARTMENT] Error:', error.message);
     res.status(500).json({ ok: false, error: 'Erro ao buscar apartamentos', detail: error.message });
@@ -2522,7 +3392,9 @@ app.put('/api/category-rates/:categoryId', async (req, res) => {
       );
     }
 
-    console.log('[CATEGORY RATES] Updated category', categoryId, 'low:', low_season_rate, 'high:', high_season_rate);
+    featuredHotelsCache = { data: null, ts: 0 };
+    marketPricesByDate.clear();
+    console.log('[CATEGORY RATES] Updated category', categoryId, '— LP cache invalidated');
     res.json({ ok: true });
   } catch (error) {
     console.error('[CATEGORY RATES] Update error:', error.message);
@@ -2579,6 +3451,45 @@ app.get('/api/lp/category-rates-public', async (req, res) => {
   }
 });
 
+app.get('/api/pricing-config', async (req, res) => {
+  try {
+    const [seasonResult, categoryResult] = await Promise.all([
+      query('SELECT * FROM season_config WHERE id = 1'),
+      query('SELECT * FROM category_rates ORDER BY category_id'),
+    ]);
+
+    const season = seasonResult.rows[0] || { high_season_months: [1, 2, 7, 12] };
+    const allMonths = [1,2,3,4,5,6,7,8,9,10,11,12];
+    const highMonths = season.high_season_months || [1, 2, 7, 12];
+    const lowMonths = allMonths.filter(m => !highMonths.includes(m));
+
+    const MONTH_NAMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+    res.json({
+      ok: true,
+      data: {
+        season: {
+          high_season_months: highMonths,
+          low_season_months: lowMonths,
+          high_season_months_names: highMonths.map(m => MONTH_NAMES[m - 1]),
+          low_season_months_names: lowMonths.map(m => MONTH_NAMES[m - 1]),
+          updated_at: season.updated_at || null,
+        },
+        categories: categoryResult.rows.map(r => ({
+          category_id: r.category_id,
+          category_name: r.category_name,
+          low_season_rate: r.low_season_rate,
+          high_season_rate: r.high_season_rate,
+          updated_at: r.updated_at || null,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error('[PRICING CONFIG] Error:', error.message);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar configuração de preços' });
+  }
+});
+
 app.get('/api/season-config', async (req, res) => {
   try {
     const result = await query('SELECT * FROM season_config WHERE id = 1');
@@ -2598,7 +3509,9 @@ app.put('/api/season-config', async (req, res) => {
       'INSERT INTO season_config (id, high_season_months, updated_at) VALUES (1, $1, NOW()) ON CONFLICT (id) DO UPDATE SET high_season_months = $1, updated_at = NOW()',
       [high_season_months]
     );
-    console.log('[SEASON CONFIG] Updated high_season_months:', high_season_months);
+    featuredHotelsCache = { data: null, ts: 0 };
+    marketPricesByDate.clear();
+    console.log('[SEASON CONFIG] Updated high_season_months:', high_season_months, '— LP cache invalidated');
     res.json({ ok: true });
   } catch (error) {
     console.error('[SEASON CONFIG] Update error:', error.message);
@@ -2638,17 +3551,21 @@ app.post('/api/lp/bookings', async (req, res) => {
     console.log('[LP BOOKINGS] Created booking:', localizador, 'user:', session.userId);
 
     try {
-      const userRow = await query('SELECT name, phone FROM users WHERE id = $1', [session.userId]);
+      const userRow = await query('SELECT name, phone, email FROM users WHERE id = $1', [session.userId]);
       const u = userRow.rows[0];
+      const bookingVars = {
+        nome: u?.name || '',
+        hotel: hotel_name || '',
+        checkin: check_in || '',
+        checkout: check_out || '',
+        localizador: localizador || '',
+        valor: total_price ? String(total_price) : '',
+      };
       if (u?.phone) {
-        triggerWhatsAppFlow('booking_confirmed', {
-          nome: u.name || '',
-          hotel: hotel_name || '',
-          checkin: check_in || '',
-          checkout: check_out || '',
-          localizador: localizador || '',
-          valor: total_price ? String(total_price) : '',
-        }, u.phone).catch(() => {});
+        triggerWhatsAppFlow('booking_confirmed', bookingVars, u.phone).catch(() => {});
+      }
+      if (u?.email) {
+        triggerEmailFlow('booking_confirmed', bookingVars, u.email).catch(() => {});
       }
     } catch(e) {}
 
@@ -2785,17 +3702,21 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
     console.log('[LP BOOKINGS] Cancelled booking:', id, 'localizador:', b.localizador);
 
     try {
-      const userRow = await query('SELECT name, phone FROM users WHERE id = $1', [session.userId]);
+      const userRow = await query('SELECT name, phone, email FROM users WHERE id = $1', [session.userId]);
       const u = userRow.rows[0];
+      const cancelVars = {
+        nome: u?.name || '',
+        hotel: b.hotel_name || '',
+        checkin: b.check_in || '',
+        checkout: b.check_out || '',
+        localizador: b.localizador || '',
+        valor: b.total_price ? String(b.total_price) : '',
+      };
       if (u?.phone) {
-        triggerWhatsAppFlow('booking_cancelled', {
-          nome: u.name || '',
-          hotel: b.hotel_name || '',
-          checkin: b.check_in || '',
-          checkout: b.check_out || '',
-          localizador: b.localizador || '',
-          valor: b.total_price ? String(b.total_price) : '',
-        }, u.phone).catch(() => {});
+        triggerWhatsAppFlow('booking_cancelled', cancelVars, u.phone).catch(() => {});
+      }
+      if (u?.email) {
+        triggerEmailFlow('booking_cancelled', cancelVars, u.email).catch(() => {});
       }
     } catch(e) {}
 
@@ -2846,38 +3767,65 @@ app.patch('/api/lp/bookings/:localizador/link-payment', async (req, res) => {
   }
 });
 
-app.post('/api/vindi/cancel-bill', async (req, res) => {
+// ========== FAQ ==========
+
+app.get('/api/faq', async (req, res) => {
   try {
-    const lpToken = parseLpToken(req);
-    const session = getLpSession(lpToken);
-    if (!session) return res.status(401).json({ ok: false, error: 'Sessão expirada' });
+    const result = await query(
+      'SELECT id, category, question, answer, display_order FROM faq_items WHERE active = true ORDER BY display_order ASC, id ASC'
+    );
+    res.json({ ok: true, data: result.rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
-    const { bill_id } = req.body;
-    if (!bill_id || !VINDI_API_KEY) {
-      return res.status(400).json({ ok: false, error: 'bill_id e chave Vindi são obrigatórios' });
-    }
+app.get('/api/admin/faq', async (req, res) => {
+  try {
+    const result = await query('SELECT * FROM faq_items ORDER BY display_order ASC, id ASC');
+    res.json({ ok: true, data: result.rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
-    console.log('[VINDI] Cancelling bill:', bill_id);
-    const response = await fetch(`https://${VINDI_BASE_URL}/api/v1/bills/${bill_id}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': 'Basic ' + Buffer.from(VINDI_API_KEY + ':').toString('base64'),
-        'Content-Type': 'application/json'
-      }
-    });
+app.post('/api/admin/faq', async (req, res) => {
+  try {
+    const { category, question, answer, display_order, active } = req.body;
+    if (!category || !question || !answer) return res.status(400).json({ ok: false, error: 'category, question e answer são obrigatórios' });
+    const result = await query(
+      'INSERT INTO faq_items (category, question, answer, display_order, active, updated_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *',
+      [category, question, answer, display_order ?? 0, active ?? true]
+    );
+    res.json({ ok: true, data: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
-    if (response.ok) {
-      await query("UPDATE payments SET status = 'cancelled' WHERE vindi_bill_id = $1", [String(bill_id)]);
-      console.log('[VINDI] Bill cancelled successfully:', bill_id);
-      res.json({ ok: true });
-    } else {
-      const text = await response.text();
-      console.error('[VINDI] Cancel bill error:', response.status, text);
-      res.json({ ok: false, error: 'Erro ao cancelar fatura na Vindi' });
-    }
-  } catch (error) {
-    console.error('[VINDI] Cancel bill error:', error.message);
-    res.status(500).json({ ok: false, error: 'Erro ao cancelar fatura' });
+app.put('/api/admin/faq/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { category, question, answer, display_order, active } = req.body;
+    const result = await query(
+      'UPDATE faq_items SET category = COALESCE($1, category), question = COALESCE($2, question), answer = COALESCE($3, answer), display_order = COALESCE($4, display_order), active = COALESCE($5, active), updated_at = NOW() WHERE id = $6 RETURNING *',
+      [category, question, answer, display_order, active, id]
+    );
+    if (!result.rows.length) return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    res.json({ ok: true, data: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.delete('/api/admin/faq/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await query('DELETE FROM faq_items WHERE id = $1 RETURNING id', [id]);
+    if (!result.rows.length) return res.status(404).json({ ok: false, error: 'Item não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -3009,7 +3957,7 @@ async function getOrCreateVindiProduct() {
   throw new Error('Não foi possível criar produto na Vindi');
 }
 
-async function findOrCreateVindiCustomer(name, email, cpf, phone) {
+async function findOrCreateVindiCustomer(name, email, cpf, phone, address) {
   const cleanCpf = cpf.replace(/\D/g, '');
   const searchResult = await vindiRequest('GET', `/customers?query=registry_code:${cleanCpf}`);
   const customers = searchResult.data?.customers || [];
@@ -3032,6 +3980,18 @@ async function findOrCreateVindiCustomer(name, email, cpf, phone) {
   if (phone) {
     const cleanPhone = phone.replace(/\D/g, '');
     customerBody.phones = [{ phone_type: 'mobile', number: cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}` }];
+  }
+  if (address && (address.zipcode || address.street)) {
+    customerBody.address = {
+      street: address.street || '',
+      number: address.number || '',
+      additional_details: address.additional_details || '',
+      zipcode: (address.zipcode || '').replace(/\D/g, ''),
+      neighborhood: address.neighborhood || '',
+      city: address.city || '',
+      state: address.state || '',
+      country: 'BR',
+    };
   }
   const created = await vindiRequest('POST', '/customers', customerBody);
   if (created.data?.customer?.id) return created.data.customer.id;
@@ -3066,6 +4026,7 @@ app.post('/api/vindi/create-bill', async (req, res) => {
       card_company_code,
       booking_locator,
       hotel_name,
+      customer_address,
     } = req.body;
 
     if (!payment_method_code || !customer_name || !customer_cpf || !amount) {
@@ -3085,7 +4046,7 @@ app.post('/api/vindi/create-bill', async (req, res) => {
     }));
 
     const productId = await getOrCreateVindiProduct();
-    const customerId = await findOrCreateVindiCustomer(customer_name, customer_email, customer_cpf.replace(/\D/g, ''), customer_phone);
+    const customerId = await findOrCreateVindiCustomer(customer_name, customer_email, customer_cpf.replace(/\D/g, ''), customer_phone, customer_address);
 
     const billBody = {
       customer_id: customerId,
@@ -3102,7 +4063,7 @@ app.post('/api/vindi/create-bill', async (req, res) => {
       billBody.metadata = { booking_locator, hotel_name };
     }
 
-    if (payment_method_code === 'credit_card' && card_number) {
+    if (payment_method_code === 'cartao_unyco' && card_number) {
       const profileResult = await vindiRequest('POST', '/payment_profiles', {
         holder_name: card_holder_name || customer_name,
         registry_code: customer_cpf.replace(/\D/g, ''),
@@ -3110,7 +4071,7 @@ app.post('/api/vindi/create-bill', async (req, res) => {
         card_expiration: card_expiration,
         card_cvv: card_cvv,
         customer_id: customerId,
-        payment_method_code: 'credit_card',
+        payment_method_code: 'cartao_unyco',
         payment_company_code: card_company_code || 'visa',
       });
 
@@ -3153,7 +4114,7 @@ app.post('/api/vindi/create-bill', async (req, res) => {
 
       const lastTx = charge.last_transaction || {};
       const gwFields = lastTx.gateway_response_fields || {};
-      const pixData = (payment_method_code === 'pix' || payment_method_code === 'pix_bank_slip') ? {
+      const pixData = (payment_method_code === 'pix' || payment_method_code === 'pix_unyco' || payment_method_code === 'pix_bank_slip') ? {
         qrcode_original_path: gwFields.qrcode_original_path || gwFields.qrcode_text || gwFields.qr_code_emv || gwFields.qrCodeEmv || null,
         qrcode_path: gwFields.qrcode_path || gwFields.qr_code_image_url || gwFields.qrCodeImageUrl || null,
         max_days_to_keep_waiting_payment: gwFields.max_days_to_keep_waiting_payment || null,
@@ -3234,9 +4195,9 @@ app.get('/api/payments', async (req, res) => {
         COALESCE(SUM(amount), 0) as total_amount,
         COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) as paid_amount,
         COALESCE(SUM(amount) FILTER (WHERE status = 'pending'), 0) as pending_amount,
-        COUNT(*) FILTER (WHERE payment_method = 'credit_card') as credit_card_count,
+        COUNT(*) FILTER (WHERE payment_method IN ('credit_card','cartao_unyco')) as credit_card_count,
         COUNT(*) FILTER (WHERE payment_method = 'bank_slip') as bank_slip_count,
-        COUNT(*) FILTER (WHERE payment_method IN ('pix','pix_bank_slip')) as pix_count
+        COUNT(*) FILTER (WHERE payment_method IN ('pix','pix_unyco','pix_bank_slip')) as pix_count
       FROM payments
     `);
 
@@ -3673,6 +4634,374 @@ app.get('/api/whatsapp/stats', async (req, res) => {
   }
 });
 
+// ========== EMAIL AUTOMATION (SMTP) ==========
+
+const SMTP_DEFAULTS = {
+  host: process.env.SMTP_HOST || '',
+  port: parseInt(process.env.SMTP_PORT || '587', 10),
+  secure: process.env.SMTP_SECURE === 'true',
+  user: process.env.SMTP_USER || '',
+  pass: process.env.SMTP_PASS || '',
+  from_name: process.env.SMTP_FROM_NAME || 'UNYCO',
+  from_email: process.env.SMTP_FROM_EMAIL || ''
+};
+
+async function getSmtpConfig() {
+  try {
+    const result = await query("SELECT value FROM system_config WHERE key = 'smtp_config'");
+    if (result.rows.length > 0 && result.rows[0].value) {
+      const cfg = result.rows[0].value;
+      return {
+        host: cfg.host || SMTP_DEFAULTS.host,
+        port: cfg.port != null && cfg.port !== '' ? parseInt(cfg.port, 10) : SMTP_DEFAULTS.port,
+        secure: cfg.secure != null ? !!cfg.secure : SMTP_DEFAULTS.secure,
+        user: cfg.user || SMTP_DEFAULTS.user,
+        pass: cfg.pass || SMTP_DEFAULTS.pass,
+        from_name: cfg.from_name || SMTP_DEFAULTS.from_name,
+        from_email: cfg.from_email || SMTP_DEFAULTS.from_email
+      };
+    }
+  } catch (e) {}
+  return { ...SMTP_DEFAULTS };
+}
+
+app.get('/api/email/config', async (req, res) => {
+  try {
+    const cfg = await getSmtpConfig();
+    res.json({ ok: true, data: {
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      user: cfg.user,
+      pass: cfg.pass ? '••••••' : '',
+      from_name: cfg.from_name,
+      from_email: cfg.from_email
+    } });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.put('/api/email/config', async (req, res) => {
+  try {
+    const { host, port, secure, user, pass, from_name, from_email } = req.body;
+    const current = await getSmtpConfig();
+    const newConfig = {
+      host: host != null ? host : current.host,
+      port: (port != null && port !== '') ? parseInt(port, 10) : current.port,
+      secure: secure != null ? !!secure : current.secure,
+      user: user != null ? user : current.user,
+      pass: (pass && !pass.startsWith('••••')) ? pass : current.pass,
+      from_name: from_name != null ? from_name : current.from_name,
+      from_email: from_email != null ? from_email : current.from_email
+    };
+    await query(
+      `INSERT INTO system_config (key, value, updated_at) VALUES ('smtp_config', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [JSON.stringify(newConfig)]
+    );
+    _mailTransporter = null;
+    _mailTransporterKey = '';
+    res.json({ ok: true, message: 'Configuração de e-mail atualizada' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+let _mailTransporter = null;
+let _mailTransporterKey = '';
+
+async function getMailTransporter() {
+  const cfg = await getSmtpConfig();
+  const key = `${cfg.host}|${cfg.port}|${cfg.secure}|${cfg.user}|${cfg.pass}`;
+  if (_mailTransporter && _mailTransporterKey === key) return { transporter: _mailTransporter, cfg };
+  _mailTransporter = nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: cfg.user ? { user: cfg.user, pass: cfg.pass } : undefined
+  });
+  _mailTransporterKey = key;
+  return { transporter: _mailTransporter, cfg };
+}
+
+function isValidEmailAddr(e) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((e || '').trim());
+}
+
+async function sendEmailMessage(recipient, subject, body, flowId = null, flowName = null, metadata = {}, isHtml = true) {
+  const to = (recipient || '').trim();
+  if (!isValidEmailAddr(to)) {
+    console.log('[EMAIL] Invalid recipient:', recipient);
+    return { ok: false, error: 'E-mail inválido' };
+  }
+
+  try {
+    const { transporter, cfg } = await getMailTransporter();
+    if (!cfg.host) throw new Error('SMTP não configurado');
+    const fromEmail = cfg.from_email || cfg.user;
+    const from = cfg.from_name ? `"${cfg.from_name}" <${fromEmail}>` : fromEmail;
+    const mail = { from, to, subject: subject || '' };
+    if (isHtml) mail.html = body; else mail.text = body;
+    const info = await transporter.sendMail(mail);
+    console.log('[EMAIL] Sent to', to, '- id:', info.messageId);
+
+    await query(
+      `INSERT INTO email_logs (flow_id, flow_name, recipient_email, subject, message, status, metadata) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [flowId, flowName || 'manual', to, subject || '', body, 'sent', JSON.stringify({ ...metadata, message_id: info.messageId, accepted: info.accepted, rejected: info.rejected })]
+    );
+
+    if (flowId) {
+      await query('UPDATE email_flows SET send_count = send_count + 1, last_sent_at = NOW() WHERE id = $1', [flowId]);
+    }
+
+    return { ok: true, messageId: info.messageId };
+  } catch (err) {
+    console.error('[EMAIL] Send error:', err.message);
+    await query(
+      `INSERT INTO email_logs (flow_id, flow_name, recipient_email, subject, message, status, error_message) VALUES ($1, $2, $3, $4, $5, 'error', $6)`,
+      [flowId, flowName || 'manual', to, subject || '', body, err.message]
+    );
+    return { ok: false, error: err.message };
+  }
+}
+
+async function triggerEmailFlow(eventName, vars, recipient) {
+  try {
+    const flows = await query('SELECT * FROM email_flows WHERE trigger_event = $1 AND enabled = true', [eventName]);
+    for (const flow of flows.rows) {
+      const subject = renderTemplate(flow.subject || '', vars);
+      const body = renderTemplate(flow.message_template, vars);
+      const isHtml = flow.is_html !== false;
+      if (flow.delay_minutes > 0) {
+        setTimeout(() => {
+          sendEmailMessage(recipient, subject, body, flow.id, flow.name, { event: eventName, vars }, isHtml);
+        }, flow.delay_minutes * 60 * 1000);
+        console.log(`[EMAIL] Flow "${flow.name}" scheduled for ${flow.delay_minutes}min`);
+      } else {
+        await sendEmailMessage(recipient, subject, body, flow.id, flow.name, { event: eventName, vars }, isHtml);
+      }
+    }
+  } catch (err) {
+    console.error('[EMAIL] Trigger error:', err.message);
+  }
+}
+
+app.get('/api/email/flows', async (req, res) => {
+  try {
+    const result = await query('SELECT * FROM email_flows ORDER BY created_at ASC');
+    res.json({ ok: true, data: result.rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/email/flows/:id', async (req, res) => {
+  try {
+    const result = await query('SELECT * FROM email_flows WHERE id = $1', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: 'Fluxo não encontrado' });
+    res.json({ ok: true, data: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/email/flows', async (req, res) => {
+  try {
+    const { name, slug, description, trigger_event, subject, message_template, is_html, enabled, delay_minutes, conditions, metadata } = req.body;
+    if (!name || !trigger_event || !message_template) return res.status(400).json({ ok: false, error: 'Campos obrigatórios: name, trigger_event, message_template' });
+    const finalSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const result = await query(
+      `INSERT INTO email_flows (name, slug, description, trigger_event, subject, message_template, is_html, enabled, delay_minutes, conditions, metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [name, finalSlug, description || '', trigger_event, subject || '', message_template, is_html !== false, enabled !== false, delay_minutes || 0, JSON.stringify(conditions || {}), JSON.stringify(metadata || {})]
+    );
+    res.json({ ok: true, data: result.rows[0] });
+  } catch (err) {
+    if (err.code === '23505') return res.status(400).json({ ok: false, error: 'Já existe um fluxo com este slug' });
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.put('/api/email/flows/:id', async (req, res) => {
+  try {
+    const { name, description, trigger_event, subject, message_template, is_html, enabled, delay_minutes, conditions, metadata } = req.body;
+    const result = await query(
+      `UPDATE email_flows SET name = COALESCE($1, name), description = COALESCE($2, description), trigger_event = COALESCE($3, trigger_event), subject = COALESCE($4, subject), message_template = COALESCE($5, message_template), is_html = COALESCE($6, is_html), enabled = COALESCE($7, enabled), delay_minutes = COALESCE($8, delay_minutes), conditions = COALESCE($9, conditions), metadata = COALESCE($10, metadata), updated_at = NOW() WHERE id = $11 RETURNING *`,
+      [name, description, trigger_event, subject, message_template, is_html, enabled, delay_minutes, conditions ? JSON.stringify(conditions) : null, metadata ? JSON.stringify(metadata) : null, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: 'Fluxo não encontrado' });
+    res.json({ ok: true, data: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.delete('/api/email/flows/:id', async (req, res) => {
+  try {
+    const result = await query('DELETE FROM email_flows WHERE id = $1 RETURNING id', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: 'Fluxo não encontrado' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.patch('/api/email/flows/:id/toggle', async (req, res) => {
+  try {
+    const result = await query('UPDATE email_flows SET enabled = NOT enabled, updated_at = NOW() WHERE id = $1 RETURNING *', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ ok: false, error: 'Fluxo não encontrado' });
+    res.json({ ok: true, data: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+const activeEmailTests = new Map();
+
+function executeEmailFlowTest(testId, recipient, flowNodes, flowId, subject, isHtml) {
+  const totalMessages = flowNodes.filter(n => n.type === 'message').length;
+  const state = { status: 'running', sent: 0, total: totalMessages, currentStep: '', error: null, schedule: [] };
+  activeEmailTests.set(testId, state);
+
+  let accumulatedDelay = 0;
+  const steps = [];
+  for (const node of flowNodes) {
+    if (node.type === 'delay') {
+      accumulatedDelay += (node.data.delay_minutes || 0);
+    } else if (node.type === 'message' && node.data.message_template) {
+      steps.push({ delay: accumulatedDelay, message: node.data.message_template });
+      accumulatedDelay = 0;
+    }
+  }
+
+  state.schedule = steps.map((s, i) => ({ step: i + 1, delay: s.delay, status: 'pending' }));
+
+  (async () => {
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      state.schedule[i].status = 'waiting';
+      if (step.delay > 0) {
+        state.currentStep = `Aguardando ${step.delay}min antes do e-mail ${i + 1}...`;
+        state.schedule[i].status = 'delaying';
+        await new Promise(resolve => setTimeout(resolve, step.delay * 60 * 1000));
+      }
+      state.currentStep = `Enviando e-mail ${i + 1} de ${totalMessages}...`;
+      state.schedule[i].status = 'sending';
+      try {
+        const r = await sendEmailMessage(recipient, subject, step.message, flowId, 'teste-manual', { step: i + 1, total: totalMessages }, isHtml);
+        if (!r.ok) throw new Error(r.error || 'Falha no envio');
+        state.sent++;
+        state.schedule[i].status = 'sent';
+      } catch (err) {
+        state.schedule[i].status = 'error';
+        state.error = err.message;
+      }
+    }
+    state.status = state.error ? 'error' : 'completed';
+    state.currentStep = state.error ? `Erro: ${state.error}` : 'Fluxo completo!';
+    setTimeout(() => activeEmailTests.delete(testId), 300000);
+  })();
+}
+
+app.post('/api/email/test', async (req, res) => {
+  try {
+    const { recipient, email, flow_id } = req.body;
+    const to = recipient || email;
+    if (!to) return res.status(400).json({ ok: false, error: 'E-mail é obrigatório' });
+
+    let flowNodes = null;
+    let subject = req.body.subject || '';
+    let isHtml = req.body.is_html !== false;
+    if (flow_id) {
+      const flowResult = await query('SELECT metadata, subject, message_template, is_html, delay_minutes, name FROM email_flows WHERE id = $1', [flow_id]);
+      if (flowResult.rows.length > 0) {
+        const flow = flowResult.rows[0];
+        subject = flow.subject || subject;
+        isHtml = flow.is_html !== false;
+        flowNodes = flow.metadata?.flow_nodes;
+        if (!flowNodes || flowNodes.length === 0) {
+          const messages = (flow.message_template || '').split('---MSG---').filter(Boolean);
+          flowNodes = [];
+          if (flow.delay_minutes > 0) {
+            flowNodes.push({ type: 'delay', data: { delay_minutes: flow.delay_minutes } });
+          }
+          messages.forEach(msg => {
+            flowNodes.push({ type: 'message', data: { message_template: msg.trim() } });
+          });
+        }
+      }
+    }
+
+    if (!flowNodes || flowNodes.length === 0) {
+      const { message } = req.body;
+      if (!message) return res.status(400).json({ ok: false, error: 'Nenhuma mensagem para enviar' });
+      const result = await sendEmailMessage(to, subject, message, flow_id, 'teste-manual', {}, isHtml);
+      return res.json(result);
+    }
+
+    const testId = `etest_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    executeEmailFlowTest(testId, to, flowNodes, flow_id, subject, isHtml);
+
+    const totalMessages = flowNodes.filter(n => n.type === 'message').length;
+    const totalDelayMinutes = flowNodes.filter(n => n.type === 'delay').reduce((s, n) => s + (n.data.delay_minutes || 0), 0);
+    res.json({ ok: true, testId, total: totalMessages, totalDelayMinutes, message: `Fluxo iniciado: ${totalMessages} e-mail(s) com ${totalDelayMinutes}min de pausa total` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/email/test/:testId', (req, res) => {
+  const state = activeEmailTests.get(req.params.testId);
+  if (!state) return res.json({ ok: true, status: 'not_found' });
+  res.json({ ok: true, ...state });
+});
+
+app.get('/api/email/logs', async (req, res) => {
+  try {
+    const { page = 1, limit = 50, flow_id, status } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const conditions = [];
+    const params = [];
+    let idx = 1;
+    if (flow_id) { conditions.push(`flow_id = $${idx++}`); params.push(flow_id); }
+    if (status) { conditions.push(`status = $${idx++}`); params.push(status); }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const countR = await query(`SELECT COUNT(*) FROM email_logs ${where}`, params);
+    const dataR = await query(`SELECT * FROM email_logs ${where} ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx}`, [...params, parseInt(limit), offset]);
+    res.json({
+      ok: true,
+      data: dataR.rows,
+      pagination: { total: parseInt(countR.rows[0].count), page: parseInt(page), limit: parseInt(limit) }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/email/stats', async (req, res) => {
+  try {
+    const statsR = await query(`
+      SELECT 
+        COUNT(*) as total_sent,
+        COUNT(*) FILTER (WHERE status = 'sent') as success,
+        COUNT(*) FILTER (WHERE status = 'error') as errors,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') as last_24h,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') as last_7d
+      FROM email_logs
+    `);
+    const flowsR = await query('SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE enabled) as active FROM email_flows');
+    res.json({
+      ok: true,
+      data: {
+        messages: statsR.rows[0],
+        flows: flowsR.rows[0]
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 if (isProduction) {
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/') && !req.path.startsWith('/lp/')) {
@@ -3692,6 +5021,12 @@ async function initializeDatabase() {
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
+
+    try {
+      await query(`ALTER TABLE users ALTER COLUMN cpf DROP NOT NULL`);
+    } catch (e) {
+      // tabela pode não existir ainda ou coluna já ser nullable - ignorar
+    }
 
     await query(
       "INSERT INTO system_config (key, value, updated_at) VALUES ('plans_enabled', $1, NOW()) ON CONFLICT (key) DO NOTHING",
@@ -3732,11 +5067,127 @@ async function initializeDatabase() {
       await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${col} ${type}`);
     }
 
+    await query(`
+      CREATE TABLE IF NOT EXISTS faq_items (
+        id SERIAL PRIMARY KEY,
+        category VARCHAR(100) NOT NULL,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        display_order INT DEFAULT 0,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+
+    const faqCount = await query('SELECT COUNT(*) FROM faq_items');
+    if (parseInt(faqCount.rows[0].count) === 0) {
+      const seed = [
+        ['Associação', 'Preciso pagar alguma taxa de adesão ou mensalidade?', 'O acesso à plataforma é totalmente gratuito, sem taxa de adesão, anuidade ou mensalidade. A Unyco não tem custos fixos.', 1],
+        ['Associação', 'Como funciona a Unyco?', 'Você se cadastra, escolhe seu hotel/data em nossa seleção de hotéis e reserva suas diárias em poucos cliques. A jornada de compra é simples, direta e sem a necessidade de fidelidade.', 2],
+        ['Economia', 'O preço da diária inclui café da manhã?', 'Sim. O valor da reserva inclui o café da manhã em todos os nossos hotéis.', 3],
+        ['Reservas', 'Onde posso ver os destinos disponíveis?', 'Basta acessar a nossa plataforma e usar o filtro de busca. A lista de destinos e hotéis disponíveis está em constante crescimento para te levar a mais lugares do jeito Unyco.', 4],
+        ['Reservas', 'Posso reservar a qualquer momento?', 'Você pode reservar qualquer data que esteja disponível na plataforma, sem se preocupar com restrições de alta temporada, feriados ou grandes eventos.', 5],
+        ['Reservas', 'Há diferença de valores em período de baixa e alta temporada?', 'Na Unyco, você foge da confusão de preços que mudam o tempo todo e encontra valores fixos, claros e exclusivos. Trabalhamos com duas temporadas: Baixa temporada (15 de março a 15 de dezembro) e Alta temporada (16 de dezembro a 14 de março).', 6],
+        ['Reservas', 'Posso reservar apenas uma diária na plataforma?', 'As reservas na Unyco são desenhadas para proporcionar uma experiência de imersão, com o mínimo de 2 diárias. É o que nos permite manter o preço fixo e exclusivo de cada categoria, oferecendo a você o melhor custo-benefício do mercado.', 7],
+        ['Praticidade', 'Qual a diferença entre a Unyco e os sites de reservas comuns?', 'A diferença está nas tarifas fixas e exclusivas, sem as flutuações do mercado hoteleiro. Negociamos preços especiais para você que busca economizar de forma inteligente, oferecendo condições que vão além das ofertas encontradas em sites de reservas comuns.', 8],
+        ['Plataforma', 'Como funciona a plataforma da Unyco?', 'A jornada no Unyco é focada em simplicidade. Você acessa a plataforma, escolhe seu destino entre nossa seleção de hotéis, verifica o preço fixo correspondente à categoria escolhida e conclui a reserva em poucos cliques, de forma totalmente digital.', 9],
+        ['Plataforma', 'Como faço para me cadastrar?', 'O processo é rápido e gratuito. Crie seu perfil em poucos minutos na Unyco e comece a buscar o seu próximo destino de viagem.', 10],
+        ['Pós-venda', 'O que faço se precisar alterar uma reserva?', 'Toda a gestão da sua reserva, incluindo cancelamentos, é feita diretamente pela plataforma de forma 100% digital e sem burocracia. Basta acessar "Suas Reservas" na sua conta. As políticas de cancelamento (prazos e taxas) são transparentes e detalhadas antes da finalização da sua compra.', 11],
+        ['Pós-venda', 'Se eu cancelar, o reembolso é imediato?', 'A liberação do valor do reembolso é processada imediatamente após sua solicitação ser confirmada na plataforma. O prazo para o crédito aparecer depende dos prazos internos do seu banco (para PIX) ou da operadora do seu cartão de crédito.', 12],
+        ['Categorias', 'Quais são as categorias de hotéis que a Unyco disponibiliza?', 'A Unyco disponibiliza as categorias Econômica, Superior e Luxo. Você escolhe a melhor para a sua viagem e pronto.', 13],
+        ['Valores', 'Quais são os valores por categoria?', 'Econômica: Alta temporada R$ 470,00 (2 pessoas) e Baixa temporada R$ 385,00 (2 pessoas). Superior: Alta temporada R$ 580,00 (2 pessoas) e Baixa temporada R$ 480,00 (2 pessoas). Luxo: Ano todo R$ 775,00 (2 pessoas). Todos com café da manhã incluso.', 14],
+      ];
+      for (const [category, question, answer, order] of seed) {
+        await query(
+          'INSERT INTO faq_items (category, question, answer, display_order, active) VALUES ($1, $2, $3, $4, true)',
+          [category, question, answer, order]
+        );
+      }
+      console.log('[DB] FAQ items seeded');
+    }
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS market_price_snapshots (
+        id SERIAL PRIMARY KEY,
+        city VARCHAR(150) NOT NULL,
+        month INTEGER NOT NULL CHECK (month >= 1 AND month <= 12),
+        median_price NUMERIC(10,2),
+        max_price NUMERIC(10,2),
+        count INTEGER DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(city, month)
+      )
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS email_flows (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) NOT NULL,
+        description TEXT,
+        trigger_event VARCHAR(100) NOT NULL,
+        subject TEXT,
+        message_template TEXT NOT NULL,
+        is_html BOOLEAN DEFAULT true,
+        enabled BOOLEAN DEFAULT true,
+        delay_minutes INTEGER DEFAULT 0,
+        conditions JSONB DEFAULT '{}',
+        metadata JSONB DEFAULT '{}',
+        send_count INTEGER DEFAULT 0,
+        last_sent_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS email_logs (
+        id SERIAL PRIMARY KEY,
+        flow_id INTEGER REFERENCES email_flows(id) ON DELETE SET NULL,
+        flow_name VARCHAR(255),
+        recipient_email VARCHAR(255),
+        subject TEXT,
+        message TEXT,
+        status VARCHAR(50) DEFAULT 'sent',
+        error_message TEXT,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     console.log('[DB] Database initialized successfully');
   } catch (err) {
     console.error('[DB] Error initializing database:', err.message);
   }
 }
+
+// ========== SWAGGER / API DOCS ==========
+
+app.get('/api/docs/openapi.json', (req, res) => {
+  res.setHeader('Content-Disposition', 'attachment; filename="unyco-api.json"');
+  res.json(swaggerSpec);
+});
+
+app.use('/api/docs', swaggerUi.serve);
+app.get('/api/docs', swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'UNYCO CRM — API Docs',
+  customCss: `
+    .topbar { background: #1e40af !important; }
+    .topbar-wrapper img { content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 30'%3E%3Ctext y='22' font-size='18' font-weight='bold' fill='white' font-family='sans-serif'%3EUNYCO API%3C/text%3E%3C/svg%3E"); }
+    .swagger-ui .info .title { color: #1e40af; }
+    .swagger-ui .opblock.opblock-post .opblock-summary-method { background: #16a34a; }
+    .swagger-ui .opblock.opblock-get .opblock-summary-method { background: #2563eb; }
+    .swagger-ui .opblock.opblock-put .opblock-summary-method { background: #d97706; }
+    .swagger-ui .opblock.opblock-patch .opblock-summary-method { background: #7c3aed; }
+    .swagger-ui .opblock.opblock-delete .opblock-summary-method { background: #dc2626; }
+  `,
+  swaggerOptions: {
+    docExpansion: 'none',
+    filter: true,
+    tryItOutEnabled: false,
+  }
+}));
 
 app.get('/api/health', async (req, res) => {
   try {

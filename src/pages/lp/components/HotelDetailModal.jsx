@@ -113,6 +113,9 @@ export default function HotelDetailModal({ hotel, open, onClose, searchParams, o
   const maxDaily = dailyPrices.length > 0 ? Math.max(...dailyPrices) : dailyPrice;
   const totalExtras = costs.reduce((sum, c) => sum + (c.extras || 0), 0);
   const hasVariation = minDaily !== maxDaily;
+  const extrasPerDay = costs[0]?.extras || 0;
+  const infoExtras = Array.isArray(hotel.info_extras) ? hotel.info_extras : [];
+  const hasExtras = extrasPerDay > 0 || totalExtras > 0 || infoExtras.length > 0;
 
   const hasCoordinates = hotel.coordinates?.latitude && hotel.coordinates?.longitude;
   const googleMapsUrl = hasCoordinates
@@ -240,7 +243,7 @@ export default function HotelDetailModal({ hotel, open, onClose, searchParams, o
                 <Wallet className="w-3 h-3" /> Total
               </div>
               <p className="text-xl font-bold text-gray-800">R$ {formatCurrency(totalPrice)}</p>
-              <p className="text-[10px] text-gray-500 mt-0.5">{dailyCount}x R$ {formatCurrency(dailyPrice)}</p>
+              <p className="text-[10px] text-gray-500 mt-0.5">R$ {formatCurrency(dailyPrice)} /noite</p>
             </div>
             <div className="bg-purple-50/80 rounded-2xl p-4 border border-purple-100/50">
               <div className="flex items-center gap-1.5 text-[10px] font-semibold text-purple-500 uppercase tracking-wider mb-1.5">
@@ -343,15 +346,15 @@ export default function HotelDetailModal({ hotel, open, onClose, searchParams, o
                   <span className="text-sm text-gray-500">Total de diárias</span>
                   <span className="text-sm font-medium text-gray-700">{hotel.dailyCount || dailyCount}</span>
                 </div>
-                {totalExtras > 0 && (
-                  <>
+                {infoExtras.length > 0 && infoExtras.map((ie, idx) => (
+                  <div key={idx}>
                     <div className="h-px bg-gray-100" />
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-500">Taxas extras</span>
-                      <span className="text-sm font-medium text-amber-600">R$ {formatCurrency(totalExtras)}</span>
+                      <span className="text-sm text-gray-500">{ie.description}</span>
+                      <span className="text-sm font-medium text-amber-600">R$ {formatCurrency(ie.total_value)}</span>
                     </div>
-                  </>
-                )}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -400,12 +403,19 @@ export default function HotelDetailModal({ hotel, open, onClose, searchParams, o
                   }`}>
                     <p className="text-[9px] text-gray-400 font-medium uppercase">Dia {i + 1}</p>
                     <p className="text-xs font-bold text-gray-700 mt-0.5">R$ {formatCurrency(c.daily)}</p>
-                    {c.extras > 0 && (
-                      <p className="text-[9px] text-amber-500 mt-0.5">+R$ {formatCurrency(c.extras)}</p>
-                    )}
                   </div>
                 ))}
               </div>
+              {infoExtras.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-blue-100/50 space-y-1.5">
+                  {infoExtras.map((ie, idx) => (
+                    <div key={idx} className="flex items-center justify-between">
+                      <span className="text-xs text-gray-500">{ie.description}</span>
+                      <span className="text-sm font-medium text-amber-600">R$ {formatCurrency(ie.total_value)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center justify-between mt-3 pt-3 border-t border-blue-100/50">
                 <span className="text-xs text-gray-500">Total das diárias</span>
                 <span className="text-sm font-bold text-gray-800">R$ {formatCurrency(totalPrice)}</span>

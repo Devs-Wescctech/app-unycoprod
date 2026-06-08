@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
-  cpf VARCHAR(20) NOT NULL,
+  cpf VARCHAR(20),
   phone VARCHAR(30),
   email VARCHAR(255),
   cep VARCHAR(15),
@@ -127,6 +127,38 @@ CREATE TABLE IF NOT EXISTS whatsapp_logs (
   flow_id INTEGER REFERENCES whatsapp_flows(id),
   flow_name VARCHAR(255),
   phone VARCHAR(50),
+  message TEXT,
+  status VARCHAR(50) DEFAULT 'sent',
+  error_message TEXT,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS email_flows (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  slug VARCHAR(255) NOT NULL,
+  description TEXT,
+  trigger_event VARCHAR(100) NOT NULL,
+  subject TEXT,
+  message_template TEXT NOT NULL,
+  is_html BOOLEAN DEFAULT true,
+  enabled BOOLEAN DEFAULT true,
+  delay_minutes INTEGER DEFAULT 0,
+  conditions JSONB DEFAULT '{}',
+  metadata JSONB DEFAULT '{}',
+  send_count INTEGER DEFAULT 0,
+  last_sent_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS email_logs (
+  id SERIAL PRIMARY KEY,
+  flow_id INTEGER REFERENCES email_flows(id) ON DELETE SET NULL,
+  flow_name VARCHAR(255),
+  recipient_email VARCHAR(255),
+  subject TEXT,
   message TEXT,
   status VARCHAR(50) DEFAULT 'sent',
   error_message TEXT,

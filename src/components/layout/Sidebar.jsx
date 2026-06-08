@@ -15,9 +15,11 @@ import {
   Wallet,
   BarChart3,
   MessageCircle,
+  Mail,
   AlertTriangle,
   Globe,
-  Settings
+  Settings,
+  HelpCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -48,6 +50,13 @@ const menuSections = [
     title: 'AUTOMAÇÃO',
     items: [
       { name: 'WhatsApp', icon: MessageCircle, page: 'WhatsAppFlows', permission: 'whatsapp' },
+      { name: 'E-mail', icon: Mail, page: 'EmailFlows', permission: 'whatsapp' },
+    ]
+  },
+  {
+    title: 'CONTEÚDO',
+    items: [
+      { name: 'FAQ', icon: HelpCircle, page: 'GerenciarFAQ', permission: 'admin' },
     ]
   },
   {

@@ -1,8 +1,26 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CreditCard, Loader2, CheckCircle2, AlertTriangle,
-  Lock, ArrowLeft, Shield, Wallet, ChevronDown, QrCode, Copy, Check, Clock
+  Lock, ArrowLeft, Shield, Wallet, ChevronDown, QrCode, Copy, Check, Clock, User as UserIcon, MapPin
 } from 'lucide-react';
+
+function isValidCPF(cpf) {
+  const c = (cpf || '').replace(/\D/g, '');
+  if (c.length !== 11 || /^(\d)\1+$/.test(c)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += parseInt(c[i]) * (10 - i);
+  let d1 = (sum * 10) % 11;
+  if (d1 === 10) d1 = 0;
+  if (d1 !== parseInt(c[9])) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) sum += parseInt(c[i]) * (11 - i);
+  let d2 = (sum * 10) % 11;
+  if (d2 === 10) d2 = 0;
+  return d2 === parseInt(c[10]);
+}
+function maskCPF(v) { const n = (v || '').replace(/\D/g, '').slice(0, 11); return n.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2'); }
+function maskPhone(v) { const n = (v || '').replace(/\D/g, '').slice(0, 11); if (n.length <= 10) return n.replace(/(\d{2})(\d)/, '($1) $2').replace(/(\d{4})(\d)/, '$1-$2'); return n.replace(/(\d{2})(\d)/, '($1) $2').replace(/(\d{5})(\d)/, '$1-$2'); }
+function maskCEP(v) { const n = (v || '').replace(/\D/g, '').slice(0, 8); return n.replace(/(\d{5})(\d)/, '$1-$2'); }
 
 function formatCurrency(value) {
   return (value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -67,8 +85,13 @@ function PaymentLoader() {
   );
 }
 
-export default function PaymentFlow({ hotel, apartment, searchParams, user, onClose, onBack, onPaymentSuccess }) {
-  const [step, setStep] = useState('choose');
+function isProfileComplete(u) {
+  if (!u) return false;
+  return !!(u.cpf && u.phone && u.cep && u.address && u.numero && u.bairro && u.cidade && u.estado);
+}
+
+export default function PaymentFlow({ hotel, apartment, searchParams, user, bookingLocator, onClose, onBack, onPaymentSuccess, onPaymentFailure, onUserUpdate }) {
+  const [step, setStep] = useState(() => (isProfileComplete(user) ? 'choose' : 'complete-data'));
   const [paymentMethod, setPaymentMethod] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
@@ -85,6 +108,86 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
   const [cardCvv, setCardCvv] = useState('');
   const [cardHolder, setCardHolder] = useState(user?.name || '');
   const [installments, setInstallments] = useState(1);
+
+  const [profileForm, setProfileForm] = useState({
+    cpf: user?.cpf || '',
+    phone: user?.phone || '',
+    cep: user?.cep || '',
+    address: user?.address || '',
+    numero: user?.numero || '',
+    bairro: user?.bairro || '',
+    cidade: user?.cidade || '',
+    estado: user?.estado || '',
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [cepLoading, setCepLoading] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setProfileForm(p => ({
+        cpf: p.cpf || user.cpf || '',
+        phone: p.phone || user.phone || '',
+        cep: p.cep || user.cep || '',
+        address: p.address || user.address || '',
+        numero: p.numero || user.numero || '',
+        bairro: p.bairro || user.bairro || '',
+        cidade: p.cidade || user.cidade || '',
+        estado: p.estado || user.estado || '',
+      }));
+    }
+  }, [user]);
+
+  const handleCepBlur = useCallback(async () => {
+    const cep = (profileForm.cep || '').replace(/\D/g, '');
+    if (cep.length !== 8) return;
+    setCepLoading(true);
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const data = await res.json();
+      if (data && !data.erro) {
+        setProfileForm(p => ({
+          ...p,
+          address: data.logradouro || p.address,
+          bairro: data.bairro || p.bairro,
+          cidade: data.localidade || p.cidade,
+          estado: data.uf || p.estado,
+        }));
+      }
+    } catch (_) {} finally { setCepLoading(false); }
+  }, [profileForm.cep]);
+
+  const handleSaveProfile = useCallback(async () => {
+    setError('');
+    if (!isValidCPF(profileForm.cpf)) return setError('CPF inválido');
+    if ((profileForm.phone || '').replace(/\D/g, '').length < 10) return setError('Telefone inválido');
+    if ((profileForm.cep || '').replace(/\D/g, '').length !== 8) return setError('CEP inválido');
+    if (!profileForm.address.trim()) return setError('Endereço obrigatório');
+    if (!profileForm.numero.trim()) return setError('Número obrigatório');
+    if (!profileForm.bairro.trim()) return setError('Bairro obrigatório');
+    if (!profileForm.cidade.trim()) return setError('Cidade obrigatória');
+    if (!profileForm.estado.trim() || profileForm.estado.length !== 2) return setError('Estado (UF) obrigatório');
+
+    setProfileSaving(true);
+    try {
+      const res = await fetch('/api/lp/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(profileForm),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setError(data.error || 'Erro ao salvar dados');
+        return;
+      }
+      if (onUserUpdate && data.user) onUserUpdate(data.user);
+      setStep('choose');
+    } catch (_) {
+      setError('Erro de conexão ao salvar dados');
+    } finally {
+      setProfileSaving(false);
+    }
+  }, [profileForm, onUserUpdate]);
 
   const totalAmount = apartment?.total_price || 0;
   const brand = detectCardBrand(cardNumber);
@@ -128,14 +231,22 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
         customer_email: user?.email || '',
         customer_cpf: user?.cpf || '',
         customer_phone: user?.phone || '',
+        customer_address: (user?.cep && user?.address) ? {
+          zipcode: user.cep,
+          street: user.address,
+          number: user.numero || '',
+          neighborhood: user.bairro || '',
+          city: user.cidade || '',
+          state: user.estado || '',
+        } : undefined,
         amount: totalAmount,
         description: `Hospedagem - ${hotel?.name || 'Hotel'} - ${apartment?.type || 'Apartamento'}`,
-        booking_locator: '',
+        booking_locator: bookingLocator || '',
         hotel_name: hotel?.name || '',
-        installments: method === 'credit_card' ? installments : 1,
+        installments: method === 'cartao_unyco' ? installments : 1,
       };
 
-      if (method === 'credit_card') {
+      if (method === 'cartao_unyco') {
         body.card_number = cardNumber.replace(/\s/g, '');
         body.card_expiration = cardExpiry;
         body.card_cvv = cardCvv;
@@ -154,27 +265,30 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
 
       if (data.ok) {
         const isPaid = data.data?.charge_status === 'paid';
-        if (method === 'pix') {
+        if (method === 'pix_unyco') {
           setResult(data.data);
           setStep('pix-display');
           startPixPolling(data.data.bill_id);
         } else if (isPaid && onPaymentSuccess) {
           onPaymentSuccess(data.data);
         } else if (!isPaid) {
-          setError('Pagamento não foi aprovado. Tente novamente.');
+          if (onPaymentFailure) onPaymentFailure(data.data);
+          setError('Pagamento não foi aprovado. A reserva foi liberada — escolha outro quarto ou forma de pagamento.');
           setStep('error');
         }
       } else {
+        if (onPaymentFailure) onPaymentFailure(null);
         setError(data.error || 'Erro ao processar pagamento');
         setStep('error');
       }
     } catch (e) {
+      if (onPaymentFailure) onPaymentFailure(null);
       setError('Erro de conexão. Tente novamente.');
       setStep('error');
     } finally {
       setProcessing(false);
     }
-  }, [user, totalAmount, hotel, apartment, installments, cardNumber, cardExpiry, cardCvv, cardHolder, brand, onPaymentSuccess]);
+  }, [user, totalAmount, hotel, apartment, installments, cardNumber, cardExpiry, cardCvv, cardHolder, brand, bookingLocator, onPaymentSuccess, onPaymentFailure]);
 
   const startPixPolling = useCallback((billId) => {
     stopPolling();
@@ -184,6 +298,7 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
     pollTimeoutRef.current = setTimeout(() => {
       stopPolling();
       setPixExpired(true);
+      if (onPaymentFailure) onPaymentFailure({ bill_id: billId, charge_status: 'expired' });
     }, POLL_MAX_MS);
 
     pollIntervalRef.current = setInterval(async () => {
@@ -198,10 +313,11 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
         } else if (FINAL_NEGATIVE.includes(status)) {
           stopPolling();
           setPixExpired(true);
+          if (onPaymentFailure) onPaymentFailure({ bill_id: billId, charge_status: status });
         }
       } catch (_) {}
     }, POLL_INTERVAL_MS);
-  }, [onPaymentSuccess, result, stopPolling]);
+  }, [onPaymentSuccess, onPaymentFailure, result, stopPolling]);
 
   const handleCopyPix = () => {
     const code = result?.pix?.qrcode_original_path;
@@ -219,16 +335,16 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
       return;
     }
     setError('');
-    handlePayment('credit_card');
+    handlePayment('cartao_unyco');
   };
 
   const handleChooseMethod = (method) => {
     setError('');
     setPaymentMethod(method);
-    if (method === 'credit_card') {
+    if (method === 'cartao_unyco') {
       setStep('form');
-    } else if (method === 'pix') {
-      handlePayment('pix');
+    } else if (method === 'pix_unyco') {
+      handlePayment('pix_unyco');
     }
   };
 
@@ -244,11 +360,154 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
         <h3 className="text-lg font-bold text-gray-800 mb-1">Erro no Pagamento</h3>
         <p className="text-sm text-red-500 mb-5 max-w-sm mx-auto">{error}</p>
         <div className="flex gap-3 justify-center">
-          <button onClick={() => { stopPolling(); setStep(paymentMethod === 'credit_card' ? 'form' : 'choose'); setError(''); }} className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2.5 rounded-xl transition-all text-sm">
-            Tentar novamente
+          <button onClick={() => { stopPolling(); if (onBack) { onBack(); } else { setStep('choose'); } setError(''); }} className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2.5 rounded-xl transition-all text-sm">
+            Voltar e tentar de novo
           </button>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-sm font-medium transition-colors">
             Fechar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 'complete-data') {
+    const missing = {
+      cpf: !user?.cpf,
+      phone: !user?.phone,
+      address: !(user?.cep && user?.address && user?.numero && user?.bairro && user?.cidade && user?.estado),
+    };
+    return (
+      <div style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
+        <div className="flex items-center gap-3 mb-5">
+          {onBack && (
+            <button onClick={onBack} className="w-9 h-9 rounded-xl bg-gray-50 hover:bg-gray-100 border border-gray-100 flex items-center justify-center transition-all hover:scale-105">
+              <ArrowLeft className="w-4 h-4 text-gray-500" />
+            </button>
+          )}
+          <div>
+            <h3 className="text-base font-bold text-gray-800">Complete seus dados</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Precisamos dessas informações para emitir o pagamento</p>
+          </div>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-800 leading-relaxed">
+            Seu cadastro está incompleto. Preencha {[missing.cpf && 'CPF', missing.phone && 'telefone', missing.address && 'endereço'].filter(Boolean).join(', ')} para continuar.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5"><UserIcon className="w-3 h-3 inline mr-1" />CPF *</label>
+              <input
+                type="text"
+                value={maskCPF(profileForm.cpf)}
+                onChange={(e) => setProfileForm(p => ({ ...p, cpf: e.target.value.replace(/\D/g, '') }))}
+                placeholder="000.000.000-00"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-400"
+                disabled={!!user?.cpf}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Telefone *</label>
+              <input
+                type="text"
+                value={maskPhone(profileForm.phone)}
+                onChange={(e) => setProfileForm(p => ({ ...p, phone: e.target.value.replace(/\D/g, '') }))}
+                placeholder="(00) 00000-0000"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-400"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5"><MapPin className="w-3 h-3 inline mr-1" />CEP *</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={maskCEP(profileForm.cep)}
+                  onChange={(e) => setProfileForm(p => ({ ...p, cep: e.target.value.replace(/\D/g, '') }))}
+                  onBlur={handleCepBlur}
+                  placeholder="00000-000"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-400"
+                />
+                {cepLoading && <Loader2 className="w-3.5 h-3.5 absolute right-2 top-2.5 animate-spin text-gray-400" />}
+              </div>
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Endereço *</label>
+              <input
+                type="text"
+                value={profileForm.address}
+                onChange={(e) => setProfileForm(p => ({ ...p, address: e.target.value }))}
+                placeholder="Rua, avenida..."
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-400"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Número *</label>
+              <input
+                type="text"
+                value={profileForm.numero}
+                onChange={(e) => setProfileForm(p => ({ ...p, numero: e.target.value }))}
+                placeholder="123"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Bairro *</label>
+              <input
+                type="text"
+                value={profileForm.bairro}
+                onChange={(e) => setProfileForm(p => ({ ...p, bairro: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-400"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Cidade *</label>
+              <input
+                type="text"
+                value={profileForm.cidade}
+                onChange={(e) => setProfileForm(p => ({ ...p, cidade: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-400"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">UF *</label>
+              <input
+                type="text"
+                value={profileForm.estado}
+                onChange={(e) => setProfileForm(p => ({ ...p, estado: e.target.value.toUpperCase().slice(0, 2) }))}
+                placeholder="SP"
+                maxLength={2}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-400 uppercase"
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <button
+            onClick={handleSaveProfile}
+            disabled={profileSaving}
+            className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-semibold py-3 rounded-xl transition-all disabled:opacity-60 flex items-center justify-center gap-2 text-sm shadow-md"
+          >
+            {profileSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</> : <>Salvar e continuar</>}
           </button>
         </div>
       </div>
@@ -280,7 +539,7 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
 
         <div className="space-y-3 mb-4">
           <button
-            onClick={() => handleChooseMethod('pix')}
+            onClick={() => handleChooseMethod('pix_unyco')}
             className="w-full bg-white border border-gray-200 hover:border-emerald-400 hover:bg-emerald-50/30 rounded-2xl p-4 flex items-center gap-4 transition-all text-left active:scale-[0.99] group"
           >
             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-100 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
@@ -294,7 +553,7 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
           </button>
 
           <button
-            onClick={() => handleChooseMethod('credit_card')}
+            onClick={() => handleChooseMethod('cartao_unyco')}
             className="w-full bg-white border border-gray-200 hover:border-blue-400 hover:bg-blue-50/30 rounded-2xl p-4 flex items-center gap-4 transition-all text-left active:scale-[0.99] group"
           >
             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
@@ -320,7 +579,14 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
     return (
       <div style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
         <div className="flex items-center gap-3 mb-5">
-          <button onClick={() => { stopPolling(); setStep('choose'); setResult(null); setPixExpired(false); }} className="w-9 h-9 rounded-xl bg-gray-50 hover:bg-gray-100 border border-gray-100 flex items-center justify-center transition-all hover:scale-105">
+          <button onClick={() => {
+            stopPolling();
+            const billId = result?.bill_id;
+            if (billId && onPaymentFailure) onPaymentFailure({ bill_id: billId, charge_status: 'abandoned' });
+            setResult(null);
+            setPixExpired(false);
+            if (onBack) onBack(); else setStep('choose');
+          }} className="w-9 h-9 rounded-xl bg-gray-50 hover:bg-gray-100 border border-gray-100 flex items-center justify-center transition-all hover:scale-105">
             <ArrowLeft className="w-4 h-4 text-gray-500" />
           </button>
           <div>
@@ -347,11 +613,12 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
                 <AlertTriangle className="w-3.5 h-3.5" />
                 <span className="text-xs font-semibold">Pix expirado ou cancelado</span>
               </div>
+              <p className="mt-2 text-[11px] text-gray-500 max-w-xs mx-auto">A reserva foi liberada e nenhum valor foi cobrado. Refaça a reserva para gerar um novo Pix.</p>
               <button
-                onClick={() => { setResult(null); setPixExpired(false); handlePayment('pix'); }}
-                className="mt-3 inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold px-4 py-2 rounded-lg transition-all"
+                onClick={() => { setResult(null); setPixExpired(false); if (onBack) onBack(); else setStep('choose'); }}
+                className="mt-3 inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-4 py-2 rounded-lg transition-all"
               >
-                <QrCode className="w-3.5 h-3.5" /> Gerar novo Pix
+                <ArrowLeft className="w-3.5 h-3.5" /> Voltar e refazer reserva
               </button>
             </>
           ) : (
@@ -401,7 +668,7 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, onCl
     );
   }
 
-  if (step === 'form' && paymentMethod === 'credit_card') {
+  if (step === 'form' && paymentMethod === 'cartao_unyco') {
     return (
       <div style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
         <div className="flex items-center gap-3 mb-5">
