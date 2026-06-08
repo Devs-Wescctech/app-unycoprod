@@ -13,7 +13,8 @@ const API_ICONS = {
   Coobmais: Server,
   Vindi: CreditCard,
   WhatsApp: MessageCircle,
-  ViaCEP: MapPin
+  ViaCEP: MapPin,
+  SerpAPI: TrendingUp
 };
 
 const API_COLORS = {
@@ -21,7 +22,8 @@ const API_COLORS = {
   Coobmais: { bg: 'from-purple-500 to-purple-700', light: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', ring: 'ring-purple-500/20' },
   Vindi: { bg: 'from-emerald-500 to-emerald-700', light: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', ring: 'ring-emerald-500/20' },
   WhatsApp: { bg: 'from-green-500 to-green-700', light: 'bg-green-50', text: 'text-green-700', border: 'border-green-200', ring: 'ring-green-500/20' },
-  ViaCEP: { bg: 'from-amber-500 to-amber-700', light: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', ring: 'ring-amber-500/20' }
+  ViaCEP: { bg: 'from-amber-500 to-amber-700', light: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', ring: 'ring-amber-500/20' },
+  SerpAPI: { bg: 'from-rose-500 to-rose-700', light: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', ring: 'ring-rose-500/20' }
 };
 
 const STATUS_CONFIG = {

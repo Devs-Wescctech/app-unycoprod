@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Settings, CreditCard, Loader2, RefreshCw, Save, Hotel, Sparkles, Crown, Gem, CheckCircle2, AlertTriangle, Sun, Snowflake, Calendar } from 'lucide-react';
+import { Settings, CreditCard, Loader2, RefreshCw, Save, Hotel, Sparkles, Crown, Gem, CheckCircle2, AlertTriangle, Sun, Snowflake, Calendar, Database, Trash2, TrendingUp } from 'lucide-react';
 import { useSystemConfig, useUpdateConfig } from '@/hooks/useSystemConfig';
 import { Toaster, toast } from 'sonner';
 
@@ -340,6 +340,102 @@ function CategoryRatesSection() {
   );
 }
 
+function CacheSection() {
+  const [refreshing, setRefreshing] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const handleRefreshMarket = async () => {
+    setRefreshing(true);
+    try {
+      const res = await fetch('/api/admin/market-prices/refresh', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        const cities = new Set((data.results || []).filter(r => r.ok).map(r => r.city)).size;
+        toast.success(`Preços atualizados: ${data.success} consultas OK${data.failed ? `, ${data.failed} falharam` : ''} (${cities} cidade${cities === 1 ? '' : 's'})`);
+      } else {
+        toast.error(data.error || 'Erro ao atualizar preços');
+      }
+    } catch {
+      toast.error('Erro de conexão ao atualizar preços');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleClearCaches = async () => {
+    setClearing(true);
+    try {
+      const res = await fetch('/api/admin/caches/clear', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(`Caches limpos: ${data.total} entrada${data.total === 1 ? '' : 's'} removida${data.total === 1 ? '' : 's'}`);
+      } else {
+        toast.error(data.error || 'Erro ao limpar caches');
+      }
+    } catch {
+      toast.error('Erro de conexão ao limpar caches');
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+      <div className="px-6 py-4 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <Database className="w-5 h-5 text-indigo-600" />
+          <h2 className="text-lg font-semibold text-slate-700">Caches e Preços de Mercado</h2>
+        </div>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Force a reconsulta dos preços de mercado (SerpAPI) e limpe os caches em memória do sistema sem precisar esperar a expiração.
+        </p>
+      </div>
+
+      <div className="p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+              <TrendingUp className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-800 text-sm">Atualizar preços de mercado (SerpAPI)</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Reconsulta o SerpAPI (cache de 30 dias) e regrava os snapshots por cidade.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleRefreshMarket}
+            disabled={refreshing || clearing}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-300 text-white font-semibold rounded-lg text-sm transition-colors shrink-0"
+          >
+            {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {refreshing ? 'Atualizando...' : 'Atualizar preços'}
+          </button>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+              <Trash2 className="w-5 h-5 text-rose-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-800 text-sm">Limpar demais caches</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Zera os caches em memória: categorias de hotéis, hotéis em destaque, preços por data, cidades e market.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleClearCaches}
+            disabled={clearing || refreshing}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-300 text-white font-semibold rounded-lg text-sm transition-colors shrink-0"
+          >
+            {clearing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            {clearing ? 'Limpando...' : 'Limpar caches'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Configuracoes() {
   const { config, plansEnabled, isLoading } = useSystemConfig();
   const updateConfig = useUpdateConfig();
@@ -423,6 +519,7 @@ export default function Configuracoes() {
 
       <SeasonConfigSection />
       <CategoryRatesSection />
+      <CacheSection />
     </div>
   );
 }

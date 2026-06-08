@@ -1501,6 +1501,22 @@ app.get('/api/central/health', async (req, res) => {
       timeout: 10000
     }));
 
+    checks.push((async () => {
+      const start = Date.now();
+      if (!SERP_API_KEY) {
+        return { name: 'SerpAPI', status: 'error', latency: 0, message: 'Chave não configurada', lastChecked: new Date().toISOString() };
+      }
+      try {
+        const resp = await fetch(`https://serpapi.com/account?api_key=${encodeURIComponent(SERP_API_KEY)}`, { signal: AbortSignal.timeout(10000) });
+        const latency = Date.now() - start;
+        const isOk = resp.status === 200;
+        return { name: 'SerpAPI', status: isOk ? 'online' : 'error', latency, message: isOk ? 'Conexão estabelecida' : `HTTP ${resp.status}`, lastChecked: new Date().toISOString() };
+      } catch (err) {
+        const latency = Date.now() - start;
+        return { name: 'SerpAPI', status: 'offline', latency, message: err.name === 'TimeoutError' ? 'Timeout' : (err.code || err.message), lastChecked: new Date().toISOString() };
+      }
+    })());
+
     const results = await Promise.all(checks);
     res.json({ success: true, apis: results });
   } catch (err) {
@@ -1580,6 +1596,18 @@ app.get('/api/central/apis', async (req, res) => {
       endpoints: [
         { method: 'GET', path: '/{cep}/json/', description: 'Buscar endereço por CEP' }
       ]
+    },
+    {
+      name: 'SerpAPI',
+      description: 'Google Hotels - Preços de mercado para comparativos da Landing Page',
+      baseUrl: 'https://serpapi.com',
+      authType: 'Chave de API',
+      hasToken: !!SERP_API_KEY,
+      category: 'Dados de Mercado',
+      endpoints: [
+        { method: 'GET', path: '/search.json?engine=google_hotels', description: 'Buscar preços de hotéis' },
+        { method: 'GET', path: '/account', description: 'Status da conta / health check' }
+      ]
     }
   ];
 
@@ -1647,7 +1675,7 @@ app.put('/api/central/apis/:name', async (req, res) => {
     const { name } = req.params;
     const { baseUrl, token, username, password } = req.body;
 
-    const allowedApis = ['TOTVS', 'Coobmais', 'Vindi', 'WhatsApp'];
+    const allowedApis = ['TOTVS', 'Coobmais', 'Vindi', 'WhatsApp', 'SerpAPI'];
     if (!allowedApis.includes(name)) {
       return res.status(400).json({ success: false, error: 'API não reconhecida' });
     }
@@ -1709,6 +1737,7 @@ app.put('/api/central/apis/:name', async (req, res) => {
       if (name === 'TOTVS') TOTVS_AUTH = token;
       if (name === 'Coobmais') COOBMAIS_TOKEN = token;
       if (name === 'Vindi') VINDI_API_KEY = token;
+      if (name === 'SerpAPI') SERP_API_KEY = token || process.env.SERP_API_KEY;
     }
 
     if (baseUrl !== undefined) {
@@ -2462,7 +2491,7 @@ async function getFirstHotelForCity(google_place_id, cityLabel) {
 let featuredHotelsCache = { data: null, ts: 0 };
 const FEATURED_HOTELS_TTL = 24 * 60 * 60 * 1000;
 
-const SERP_API_KEY = process.env.SERP_API_KEY;
+let SERP_API_KEY = apiConfigOverrides.SerpAPI?.token || process.env.SERP_API_KEY;
 
 function toTitleCase(str) {
   return str.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
@@ -2883,6 +2912,33 @@ app.post('/api/admin/market-prices/refresh', async (req, res) => {
 
   console.log(`[SERP REFRESH] Done: ${success} ok, ${failed} failed`);
   res.json({ ok: true, success, failed, results });
+});
+
+app.post('/api/admin/caches/clear', async (req, res) => {
+  try {
+    const cleared = {
+      hotelCategory: hotelCategoryCache.size,
+      cities: citiesCache.size,
+      marketByDate: marketPricesByDate.size,
+      serpMarket: serpMarketCache.size,
+      serpSearch: serpSearchCache.size,
+      featuredHotels: featuredHotelsCache.data ? 1 : 0,
+    };
+
+    hotelCategoryCache.clear();
+    citiesCache.clear();
+    marketPricesByDate.clear();
+    serpMarketCache.clear();
+    serpSearchCache.clear();
+    featuredHotelsCache = { data: null, ts: 0 };
+
+    const total = Object.values(cleared).reduce((a, b) => a + b, 0);
+    console.log(`[CACHE CLEAR] Cleared ${total} entries`, cleared);
+    res.json({ ok: true, cleared, total });
+  } catch (e) {
+    console.error('[CACHE CLEAR] Error:', e.message);
+    res.status(500).json({ ok: false, error: 'Erro ao limpar caches', detail: e.message });
+  }
 });
 
 app.get('/api/lp/featured-hotels', async (req, res) => {
