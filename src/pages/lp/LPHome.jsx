@@ -25,6 +25,7 @@ export default function LPHome() {
   const [modalOpen, setModalOpen] = useState(false);
   const [bookingHotel, setBookingHotel] = useState(null);
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [pendingBooking, setPendingBooking] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -186,25 +187,37 @@ export default function LPHome() {
     setSubscription(null);
   };
 
-  const handleAuthSuccess = async (userData, subscriptionData) => {
-    setUser(userData);
-    setSubscription(subscriptionData);
-  };
-
-  const handleBooking = (hotel) => {
-    if (plansEnabled) {
-      if (!user) {
-        setAuthModal('login');
-        return;
-      }
-      if (!subscription || subscription.status !== 'ativa') {
-        window.location.href = '/lp/checkout.html';
-        return;
-      }
-    }
+  const startBooking = (hotel) => {
     setModalOpen(false);
     setBookingHotel(hotel);
     setBookingOpen(true);
+  };
+
+  const handleAuthSuccess = async (userData, subscriptionData) => {
+    setUser(userData);
+    setSubscription(subscriptionData);
+    if (pendingBooking) {
+      const hotel = pendingBooking;
+      setPendingBooking(null);
+      if (plansEnabled && (!subscriptionData || subscriptionData.status !== 'ativa')) {
+        window.location.href = '/lp/checkout.html';
+        return;
+      }
+      startBooking(hotel);
+    }
+  };
+
+  const handleBooking = (hotel) => {
+    if (!user) {
+      setPendingBooking(hotel);
+      setAuthModal('login');
+      return;
+    }
+    if (plansEnabled && (!subscription || subscription.status !== 'ativa')) {
+      window.location.href = '/lp/checkout.html';
+      return;
+    }
+    startBooking(hotel);
   };
 
   if (loading) {
@@ -936,7 +949,7 @@ export default function LPHome() {
       {authModal && (
         <AuthModal
           initialTab={authModal}
-          onClose={() => setAuthModal(null)}
+          onClose={() => { setAuthModal(null); setPendingBooking(null); }}
           onSuccess={(userData, subscriptionData) => {
             handleAuthSuccess(userData, subscriptionData);
             setAuthModal(null);

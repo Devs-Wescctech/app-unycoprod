@@ -399,7 +399,7 @@ function CacheSection() {
             </div>
             <div>
               <h3 className="font-semibold text-slate-800 text-sm">Atualizar preços de mercado (SerpAPI)</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Reconsulta o SerpAPI (cache de 30 dias) e regrava os snapshots por cidade.</p>
+              <p className="text-xs text-slate-500 mt-0.5">Reconsulta o SerpAPI (cache de 90 dias) e regrava os snapshots por cidade.</p>
             </div>
           </div>
           <button

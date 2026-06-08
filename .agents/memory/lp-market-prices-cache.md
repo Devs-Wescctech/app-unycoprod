@@ -20,9 +20,19 @@ Os guards de gravação E leitura (memória + DB blob) devem checar `data.some(r
 ## Modelo de dados: tudo por-noite
 `hotel.price` no frontend = `cost[0].daily` (diária aplicada). SerpAPI coleta `rate_per_night.extracted_lowest` (por noite). Comparação por-noite vs por-noite é válida — NÃO há mismatch total-vs-diária.
 
-## Cache mensal (30 dias) e sinergia entre superfícies
-- `/api/lp/market-prices` (carrossel): memória chave estática `'current'` (24h) → blob completo em `system_config` key `market_prices_cache` (30d, preserva `sourcePrices`) → SerpAPI sequencial (sleep 600ms, break no 429) só em miss. Ao computar, grava também snapshot por cidade em `market_price_snapshots`.
+## Cache (90 dias) e sinergia entre superfícies
+- `/api/lp/market-prices` (carrossel): memória chave estática `'current'` (24h) → blob completo em `system_config` key `market_prices_cache` (90d via `SNAPSHOT_TTL_MS`, preserva `sourcePrices`) → SerpAPI sequencial (sleep 600ms, break no 429) só em miss. Ao computar, grava também snapshot por cidade em `market_price_snapshots`.
 - `/api/lp/serp-prices` (card verde): lê `market_price_snapshots (city, month)` antes de chamar SerpAPI → reaproveita o que o carrossel já gravou (retorna `cached:"db"`).
+- TTL foi 30d e passou para **90d** (pedido do usuário). Ao mudar o TTL, alinhar textos de UI (Configuracoes.jsx) e replit.md que citam o prazo.
+
+## "Limpar caches" TEM que apagar o cache do BANCO, não só memória
+`POST /api/admin/caches/clear` deve, além de limpar os Maps em memória, `DELETE` o blob `market_prices_cache` e todos os `market_price_snapshots`.
+**Why:** o Comparativo é servido do blob persistente (TTL 90d); limpar só memória NÃO reseta — o blob sobrevive e continua sendo servido. Usuário reportou que o botão "Limpar caches" não resetava o comparativo exatamente por isso.
+
+## Fontes por OTA (Booking/Expedia/etc.) exigem consulta a NÍVEL DE HOTEL
+A busca por cidade NÃO traz OTAs (cada property só tem `rate_per_night.extracted_lowest`, sem `source`; `prices`/`featured_prices` raiz vêm vazios). Para listar OTAs é obrigatória uma 2ª chamada com **`q` (cidade) + `property_token` juntos** (`fetchSerpPropertyPrices`); sem `q` retorna `{error}`. Daí `prices[]`/`featured_prices[]` trazem `{source, rate_per_night.extracted_lowest}`.
+**Why:** usuário pediu "mais fontes" no comparativo; só aparecia "Google Hotels" porque nunca se consultava nível de hotel.
+**How to apply:** `fetchSerpPrices` retorna `properties:[{token,price}]`; o handler escolhe a property mais próxima do `marketPrice` (representativa), faz 1 chamada extra por hotel (cache `prop:token|checkIn`), filtra fontes > tarifa Unyco, cap 5, embute em `sourcePrices` no blob 90d → custo extra só no recálculo completo.
 
 ## Chaves de cidade DEVEM ser normalizadas
 Escrita (carrossel `hotel.city`) e leitura (card verde `extractCityFromQuery`) precisam passar por `normalizeCity()` (NFD + strip acentos + lowercase + colapsa espaços).

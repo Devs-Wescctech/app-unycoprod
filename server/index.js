@@ -2551,6 +2551,7 @@ function collectSerpPricesBySource(data) {
   });
 
   (data.featured_prices || []).forEach(fp => {
+    push(fp.source, fp.rate_per_night?.extracted_lowest);
     (fp.rooms || []).forEach(room => {
       (room.rates || []).forEach(rate => {
         push(rate.source, rate.rate_per_night?.extracted_lowest);
@@ -2586,13 +2587,47 @@ async function fetchSerpPrices(query, checkIn, checkOut, adults = 2) {
   const prices = collectSerpPrices(data);
   const bySource = collectSerpPricesBySource(data);
 
+  // Propriedades com token p/ buscar fontes por OTA depois (consulta a nível de hotel).
+  const properties = [];
+  if (Array.isArray(data.properties)) {
+    data.properties.forEach(p => {
+      const price = p.rate_per_night?.extracted_lowest;
+      if (p.property_token && typeof price === 'number' && price > 0) {
+        properties.push({ token: p.property_token, price: Math.round(price) });
+      }
+    });
+  }
+
   return {
     median: prices.length ? Math.round(getMedian(prices)) : null,
     min: prices.length ? Math.round(Math.min(...prices)) : null,
     max: prices.length ? Math.round(Math.max(...prices)) : null,
     count: prices.length,
     bySource,
+    properties,
   };
+}
+
+// Consulta a nível de HOTEL (q + property_token) — única forma de obter preços por OTA
+// (Booking, Expedia, trivago, etc.). A busca por cidade só traz um preço agregado por hotel.
+async function fetchSerpPropertyPrices(query, propertyToken, checkIn, checkOut, adults = 2) {
+  const url = new URL('https://serpapi.com/search.json');
+  url.searchParams.set('engine', 'google_hotels');
+  url.searchParams.set('q', query);
+  url.searchParams.set('property_token', propertyToken);
+  url.searchParams.set('check_in_date', checkIn);
+  url.searchParams.set('check_out_date', checkOut);
+  url.searchParams.set('adults', String(adults));
+  url.searchParams.set('children', '0');
+  url.searchParams.set('currency', 'BRL');
+  url.searchParams.set('gl', 'br');
+  url.searchParams.set('hl', 'pt-br');
+  url.searchParams.set('api_key', SERP_API_KEY);
+  const resp = await fetch(url.toString(), { signal: AbortSignal.timeout(12000) });
+  if (!resp.ok) throw new Error(`SerpAPI prop ${resp.status}`);
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error);
+  return collectSerpPricesBySource(data);
 }
 
 const marketPricesByDate = new Map();
@@ -2743,29 +2778,49 @@ app.get('/api/lp/market-prices', async (req, res) => {
         console.log(`[MARKET PRICES] Ocultando ${hotel.city} — Unyco (R$${unycoPrice}) > concorrente (R$${marketPrice})`);
       }
 
-      // Build per-source prices for comparison section — only sources more expensive than Unyco
-      const sourcePrices = [];
-      if (unycoPrice) {
-        // Always include a "Google Hotels" entry using the overall max
-        if (marketPrice && marketPrice > unycoPrice) {
-          sourcePrices.push({ source: 'Google Hotels', price: marketPrice });
-        }
-        // Add individual OTA sources from bySource (skip if already captured as max or if cheaper)
-        for (const [source, price] of serpBySource.entries()) {
-          const rp = Math.round(price);
-          if (rp > unycoPrice && source !== 'Google Hotels') {
-            // avoid duplicating what's already the max
-            if (rp !== marketPrice || !sourcePrices.find(s => s.source === 'Google Hotels')) {
-              sourcePrices.push({ source, price: rp });
+      // Fontes reais por OTA: consulta a nível de hotel (property_token) — 1 chamada extra por hotel.
+      // A busca por cidade não traz OTAs; só a consulta por hotel devolve Booking/Expedia/trivago/etc.
+      let realSources = new Map();
+      if (unycoPrice && chosenSerp && Array.isArray(chosenSerp.properties) && chosenSerp.properties.length) {
+        const target = marketPrice || chosenSerp.median || chosenSerp.max || unycoPrice;
+        const rep = chosenSerp.properties
+          .slice()
+          .sort((a, b) => Math.abs(a.price - target) - Math.abs(b.price - target))[0];
+        if (rep && rep.token) {
+          const pKey = `prop:${rep.token}|${usedDates.checkIn}`;
+          const pc = serpMarketCache.get(pKey);
+          if (pc && Date.now() - pc.ts < SERP_MARKET_TTL) {
+            realSources = pc.data || new Map();
+          } else {
+            try {
+              await sleep(600);
+              realSources = await fetchSerpPropertyPrices(q, rep.token, usedDates.checkIn, usedDates.checkOut, 2);
+              serpMarketCache.set(pKey, { data: realSources, ts: Date.now() });
+              console.log(`[MARKET PRICES] Fontes OTA ${hotel.city}: ${[...realSources.keys()].join(', ') || '(nenhuma)'}`);
+            } catch (e) {
+              console.warn(`[MARKET PRICES] Falha ao buscar fontes OTA de ${hotel.city}: ${e.message}`);
             }
           }
         }
-        // Sort by price desc, cap at 4 sources
-        sourcePrices.sort((a, b) => b.price - a.price);
-        sourcePrices.splice(4);
       }
 
-      // Persiste snapshot por cidade (30 dias) para o card verde reaproveitar sem chamar SerpAPI
+      // Monta as fontes do comparativo — apenas as mais caras que a tarifa fixa Unyco.
+      const sourcePrices = [];
+      if (unycoPrice) {
+        for (const [source, price] of realSources.entries()) {
+          const rp = Math.round(price);
+          if (rp > unycoPrice) sourcePrices.push({ source, price: rp });
+        }
+        // Fallback: nenhuma OTA capturada → mostra ao menos o agregado "Google Hotels".
+        if (sourcePrices.length === 0 && marketPrice && marketPrice > unycoPrice) {
+          sourcePrices.push({ source: 'Google Hotels', price: marketPrice });
+        }
+        // Ordena do mais caro ao mais barato e limita a 5 fontes.
+        sourcePrices.sort((a, b) => b.price - a.price);
+        sourcePrices.splice(5);
+      }
+
+      // Persiste snapshot por cidade (90 dias) para o card verde reaproveitar sem chamar SerpAPI
       if (chosenSerp && (chosenSerp.median || chosenSerp.max) && hotel.city) {
         try {
           await query(
@@ -2830,7 +2885,7 @@ function buildMonthSampleDates(month) {
   return { ci, co };
 }
 
-const SNAPSHOT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const SNAPSHOT_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
 app.get('/api/lp/serp-prices', async (req, res) => {
   const { q, check_in_date, check_out_date, adults = '2' } = req.query;
@@ -2931,6 +2986,24 @@ app.post('/api/admin/caches/clear', async (req, res) => {
     serpMarketCache.clear();
     serpSearchCache.clear();
     featuredHotelsCache = { data: null, ts: 0 };
+
+    // Também remove os caches persistidos no banco (comparativo de preços + snapshots por cidade),
+    // senão o blob de 90 dias continua sendo servido após o "Limpar caches" e o comparativo não reseta.
+    let marketPricesBlob = 0, marketSnapshots = 0;
+    try {
+      const r1 = await query("DELETE FROM system_config WHERE key = 'market_prices_cache'");
+      marketPricesBlob = r1.rowCount || 0;
+    } catch (e) {
+      console.warn('[CACHE CLEAR] Erro ao remover blob market_prices_cache:', e.message);
+    }
+    try {
+      const r2 = await query('DELETE FROM market_price_snapshots');
+      marketSnapshots = r2.rowCount || 0;
+    } catch (e) {
+      console.warn('[CACHE CLEAR] Erro ao remover market_price_snapshots:', e.message);
+    }
+    cleared.marketPricesBlob = marketPricesBlob;
+    cleared.marketSnapshots = marketSnapshots;
 
     const total = Object.values(cleared).reduce((a, b) => a + b, 0);
     console.log(`[CACHE CLEAR] Cleared ${total} entries`, cleared);
