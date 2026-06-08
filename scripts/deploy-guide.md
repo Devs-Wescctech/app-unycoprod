@@ -55,12 +55,41 @@ Os secrets ficam em um arquivo `.env` ao lado do compose (NÃO commitado). Crie 
 DATABASE_URL=postgresql://auth_bd:<DB_PASSWORD_URLENCODED>@172.17.0.1:5432/unycoprod
 TOTVS_API_TOKEN=<TOTVS_API_TOKEN_BASE64>
 VINDI_API_KEY=<VINDI_API_KEY>
+
+# Coobmais (PROD) — auto-login JWT
+COOBMAIS_BASE_URL=https://apiprod.coobmais.com.br/unico/api
+COOBMAIS_AUTH_URL=https://apiprod.coobmais.com.br/auth/api/Users/Authenticate
+COOBMAIS_ACCESS_KEY=<COOBMAIS_ACCESS_KEY>
+COOBMAIS_PASSWORD=<COOBMAIS_PASSWORD>
 ```
 
 Permissões restritas:
 ```bash
 chmod 600 /var/www/html/app-unycoprod/.env
 ```
+
+> **Importante — credenciais Coobmais devem ficar no `.env`.** As variáveis
+> `COOBMAIS_ACCESS_KEY` e `COOBMAIS_PASSWORD` (além de `COOBMAIS_BASE_URL` e
+> `COOBMAIS_AUTH_URL`) precisam estar neste `.env` de produção. Embora a Central
+> de APIs permita salvar essas credenciais pela interface, elas são gravadas em
+> `server/api-config.json`, que **não** está no volume persistente
+> (`app-data:/app/server/data`) e está no `.gitignore`. Por isso esse arquivo é
+> **efêmero**: tudo que for salvo pela UI se perde a cada recriação/redeploy do
+> container. O `.env` é a única fonte durável. Se as credenciais não estiverem
+> no `.env`, o sistema mostrará "Coobmais não configurada" após o próximo
+> redeploy.
+>
+> Após editar o `.env`, recrie o container para aplicar as variáveis:
+> ```bash
+> cd /var/www/html/app-unycoprod
+> docker compose up -d --force-recreate
+> ```
+>
+> Valide se as credenciais foram carregadas:
+> ```bash
+> curl http://localhost:5100/api/central/coobmais/token
+> # Deve retornar "hasCredentials": true
+> ```
 
 **Portas em uso no servidor:**
 - 5000: app-politicall
@@ -135,3 +164,7 @@ docker compose up -d
 | `DB_SSL` | `true` ou `false` (default: false) | Não |
 | `TOTVS_API_TOKEN` | Token Basic Auth TOTVS (base64) | Sim |
 | `VINDI_API_KEY` | Chave API Vindi | Sim |
+| `COOBMAIS_BASE_URL` | URL base da API Coobmais | Sim |
+| `COOBMAIS_AUTH_URL` | URL de autenticação (auto-login JWT) | Sim |
+| `COOBMAIS_ACCESS_KEY` | AccessKey Coobmais (login) | Sim |
+| `COOBMAIS_PASSWORD` | Senha Coobmais (login) | Sim |
