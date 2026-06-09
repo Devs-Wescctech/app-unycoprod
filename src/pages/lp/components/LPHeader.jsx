@@ -270,7 +270,7 @@ export default function LPHeader({ user, onLogout, onUserUpdate, onOpenAuth }) {
                       <div className="px-3 py-1.5">
                         <p className="text-[9px] font-bold text-white/20 uppercase tracking-[0.15em] px-3 mb-1">Suporte</p>
                         <DropdownItem icon={HelpCircle} label="Central de Ajuda" subtitle="Duvidas frequentes e contato" onClick={() => { setProfileOpen(false); setActiveView('ajuda'); }} />
-                        <DropdownItem icon={MessageCircle} label="WhatsApp" subtitle="Atendimento direto" onClick={() => window.open('https://wa.me/5551991777183', '_blank')} external />
+                        <DropdownItem icon={MessageCircle} label="WhatsApp" subtitle="Atendimento direto" onClick={() => window.open('https://wa.me/555130273375', '_blank')} external />
                       </div>
 
                       <div className="px-3 pb-3.5 pt-1">
@@ -757,9 +757,9 @@ function ProfileModal({ user, onClose, plansEnabled, onUserUpdate }) {
 
 function HelpModal({ onClose }) {
   const helpItems = [
-    { icon: MessageCircle, label: 'WhatsApp', description: 'Fale conosco pelo WhatsApp', action: () => window.open('https://wa.me/5551991777183', '_blank'), external: true },
+    { icon: MessageCircle, label: 'WhatsApp', description: 'Fale conosco pelo WhatsApp', action: () => window.open('https://wa.me/555130273375', '_blank'), external: true },
     { icon: Mail, label: 'E-mail', description: 'suporte@unyco.com.br', action: () => window.open('mailto:suporte@unyco.com.br'), external: true },
-    { icon: Phone, label: 'Telefone', description: '(51) 99177-7183', action: () => window.open('tel:+5551991777183'), external: true },
+    { icon: Phone, label: 'Telefone', description: '(51) 3027-3375', action: () => window.open('tel:+555130273375'), external: true },
   ];
 
   return (

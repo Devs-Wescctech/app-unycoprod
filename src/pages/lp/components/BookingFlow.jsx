@@ -977,7 +977,7 @@ function StepReview({ apartment, hotel, searchParams, user, expandedPolicy, setE
                       const checkInStr = searchParams?.checkIn ? format(searchParams.checkIn, 'dd/MM/yyyy') : '';
                       const checkOutStr = searchParams?.checkOut ? format(searchParams.checkOut, 'dd/MM/yyyy') : '';
                       const msg = `Olá, preciso saber mais sobre a política de no-show da minha reserva:\nHotel: ${hotelName}${cityState ? `\nCidade/Estado: ${cityState}` : ''}${checkInStr ? `\nCheck-in: ${checkInStr}` : ''}${checkOutStr ? `\nCheck-out: ${checkOutStr}` : ''}`;
-                      return `https://wa.me/5554994576992?text=${encodeURIComponent(msg)}`;
+                      return `https://wa.me/555130273375?text=${encodeURIComponent(msg)}`;
                     })()}
                     target="_blank"
                     rel="noopener noreferrer"
