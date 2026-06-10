@@ -1,3 +1,4 @@
 - [LP market prices / SerpAPI cache](lp-market-prices-cache.md) — median (não max); cache DB 90d; "Limpar caches" deve apagar blob+snapshots; fontes por OTA exigem consulta por property_token; chaves de cidade normalizadas.
 - [Hero video single-click unmute](hero-video-mute.md) — vídeo re-mutava sozinho: ref callback inline, prop `muted` no JSX e `onCanPlay` forçando mudo; setup imperativo via useEffect único.
+- [Central de APIs persistence & Vindi 401](api-config-persistence.md) — configs em `system_config.api_config` (DB, não JSON do container); migração descarta token Vindi; precedência Vindi = override DB > .env.
 - [Tarifas por categoria sazonais](category-rates-seasonal.md) — Diamante não é mais valor fixo; todas usam low/high season com mesma fórmula em backend, BookingFlow, AlternativesModal e admin.

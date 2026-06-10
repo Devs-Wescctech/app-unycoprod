@@ -167,4 +167,5 @@ CREATE TABLE IF NOT EXISTS email_logs (
 );
 
 INSERT INTO system_config (key, value) VALUES ('plans_enabled', 'true') ON CONFLICT (key) DO NOTHING;
+INSERT INTO system_config (key, value) VALUES ('api_config', '{}') ON CONFLICT (key) DO NOTHING;
 INSERT INTO season_config (id, high_season_months) VALUES (1, '{1,2,7,12}') ON CONFLICT (id) DO NOTHING;

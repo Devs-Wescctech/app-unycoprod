@@ -459,7 +459,7 @@ export default function SearchForm({ onSearch, initialDestino }) {
         }));
         onSearch(hotels, params);
       } else if (onSearch) {
-        onSearch([], params);
+        onSearch([], params, data.error || 'Não foi possível buscar hospedagens no momento. Tente novamente em instantes.');
       }
     } catch (e) {
       console.error('Search error:', e);

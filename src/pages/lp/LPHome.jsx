@@ -530,7 +530,7 @@ export default function LPHome() {
           {searchError ? (
             <div className="bg-amber-50 border border-amber-100 text-amber-700 rounded-2xl p-6 text-center">
               <p className="font-medium">Erro ao buscar hospedagens</p>
-              <p className="text-sm mt-1 text-amber-600">Verifique sua conexão e tente novamente.</p>
+              <p className="text-sm mt-1 text-amber-600">{searchError}</p>
             </div>
           ) : hotels.length === 0 ? (
             <div className="bg-white border border-gray-100 rounded-2xl p-10 text-center shadow-sm">

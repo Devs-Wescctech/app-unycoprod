@@ -409,7 +409,7 @@ export const swaggerSpec = {
                   destination: { type: 'string', example: 'Gramado' },
                   checkIn: { type: 'string', format: 'date', example: '2026-07-10' },
                   checkOut: { type: 'string', format: 'date', example: '2026-07-15' },
-                  guests: { type: 'integer', default: 2 }
+                  adults: { type: 'integer', default: 2 }
                 }
               }
             }

@@ -347,6 +347,26 @@ export default function CentralAPIs() {
     }
   };
 
+  const [clearingVindi, setClearingVindi] = useState(false);
+
+  const handleClearVindiToken = async () => {
+    setClearingVindi(true);
+    try {
+      const res = await fetch('/api/central/vindi/clear-token', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setEditForm(prev => ({ ...prev, token: '' }));
+        await fetchApis();
+        await fetchConfig();
+        await checkAllHealth();
+      }
+    } catch (err) {
+      console.error('Erro ao limpar token Vindi:', err);
+    } finally {
+      setClearingVindi(false);
+    }
+  };
+
   const handleEditApi = (api) => {
     const config = apiConfig[api.name] || {};
     setEditForm({
@@ -784,13 +804,29 @@ export default function CentralAPIs() {
                     </button>
                   </div>
                   <p className="text-xs text-slate-400 mt-1.5">Deixe em branco para manter o valor atual</p>
+                  {editingApi.name === 'Vindi' && (
+                    <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                      <p className="text-xs text-slate-500">
+                        Para destravar erros de credencial (HTTP 401), remova o token salvo e volte a usar a chave do ambiente (.env).
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleClearVindiToken}
+                        disabled={clearingVindi}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                      >
+                        {clearingVindi ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        Limpar override e usar chave do ambiente
+                      </button>
+                    </div>
+                  )}
                 </div>
                 )}
 
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                  <p className="text-xs text-amber-700">
-                    <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
-                    Alteracoes de token serao aplicadas em memoria. Para persistir entre reinicializacoes, atualize tambem as variaveis de ambiente.
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                  <p className="text-xs text-emerald-700">
+                    <CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />
+                    As configurações são salvas no banco de dados e sobrevivem a reinicializações/redeploys do servidor.
                   </p>
                 </div>
               </div>

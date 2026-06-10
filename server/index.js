@@ -1411,6 +1411,16 @@ function checkApiHealth(name, options, writeBody = null) {
           }
         }
 
+        if (name === 'Vindi') {
+          if (proxyRes.statusCode === 401 || proxyRes.statusCode === 403) {
+            status = 'offline';
+            message = `Chave inválida (HTTP ${proxyRes.statusCode}) — verifique a API Key e se o ambiente (produção x sandbox) corresponde à chave`;
+          } else if (isOk) {
+            status = 'online';
+            message = 'Conexão funcionando';
+          }
+        }
+
         resolve({ name, status, latency, message, lastChecked: new Date().toISOString() });
       });
     });
@@ -1466,18 +1476,22 @@ app.get('/api/central/health', async (req, res) => {
       }
     })());
 
-    const vindiAuth = VINDI_API_KEY ? Buffer.from(`${VINDI_API_KEY}:`).toString('base64') : '';
-    checks.push(checkApiHealth('Vindi', {
-      hostname: VINDI_BASE_URL || 'sandbox-app.vindi.com.br',
-      port: 443,
-      path: '/api/v1/payment_methods',
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Basic ${vindiAuth}`
-      },
-      timeout: 10000
-    }));
+    if (!VINDI_API_KEY) {
+      checks.push(Promise.resolve({ name: 'Vindi', status: 'error', latency: 0, message: 'Chave ausente — configure a API Key da Vindi', lastChecked: new Date().toISOString() }));
+    } else {
+      const vindiAuth = Buffer.from(`${VINDI_API_KEY}:`).toString('base64');
+      checks.push(checkApiHealth('Vindi', {
+        hostname: VINDI_BASE_URL || 'sandbox-app.vindi.com.br',
+        port: 443,
+        path: '/api/v1/payment_methods',
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${vindiAuth}`
+        },
+        timeout: 10000
+      }));
+    }
 
     const waConfig = await getWhatsAppConfig();
     const waUrl = (() => { try { return new URL(waConfig.api_url); } catch (_) { return new URL('https://api.wescctech.com.br/core/v2/api'); } })();
@@ -1670,6 +1684,21 @@ app.post('/api/central/coobmais/refresh-token', async (req, res) => {
   }
 });
 
+app.post('/api/central/vindi/clear-token', async (req, res) => {
+  try {
+    if (apiConfigOverrides.Vindi) delete apiConfigOverrides.Vindi.token;
+    VINDI_API_KEY = process.env.VINDI_API_KEY;
+    await saveApiConfigToDb();
+    res.json({
+      success: true,
+      message: 'Override da Vindi removido. Usando a chave do ambiente (.env).',
+      hasEnvKey: !!process.env.VINDI_API_KEY,
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 app.put('/api/central/apis/:name', async (req, res) => {
   try {
     const { name } = req.params;
@@ -1769,7 +1798,7 @@ app.put('/api/central/apis/:name', async (req, res) => {
       );
     }
 
-    fs.writeFileSync(API_CONFIG_FILE, JSON.stringify(apiConfigOverrides, null, 2));
+    await saveApiConfigToDb();
     
     res.json({ success: true, message: `Configuração de ${name} atualizada` });
   } catch (err) {
@@ -1843,6 +1872,7 @@ function parseLpToken(req) {
 }
 
 let COOBMAIS_TOKEN = process.env.COOBMAIS_TOKEN || '';
+const N8N_HOTELS_URL = process.env.N8N_HOTELS_URL || 'https://n8n.wescctech.com.br/webhook/busca-hoteis';
 let COOBMAIS_BASE_URL = process.env.COOBMAIS_BASE_URL || 'https://apiprod.coobmais.com.br/unico/api';
 let COOBMAIS_AUTH_URL = process.env.COOBMAIS_AUTH_URL || 'https://apiprod.coobmais.com.br/auth/api/Users/Authenticate';
 let COOBMAIS_ACCESS_KEY = process.env.COOBMAIS_ACCESS_KEY || '';
@@ -1908,7 +1938,7 @@ async function ensureCoobToken() {
       }
       if (!apiConfigOverrides.Coobmais) apiConfigOverrides.Coobmais = {};
       apiConfigOverrides.Coobmais.token = newToken;
-      try { fs.writeFileSync(API_CONFIG_FILE, JSON.stringify(apiConfigOverrides, null, 2)); } catch (_) {}
+      try { await saveApiConfigToDb(); } catch (_) {}
       console.log('[Coobmais] Token renovado, expira em', new Date(coobmaisTokenExp).toISOString());
       return newToken;
     } finally {
@@ -2258,55 +2288,65 @@ app.post('/api/lp/hotels', async (req, res) => {
 
     const childrenCount = typeof children === 'number' ? children : (Array.isArray(children) ? children.length : parseInt(children) || 0);
 
-    let resolvedPlaceId = google_place_id || '';
+    const adultsCount = Math.max(2, parseInt(adults) || 2);
 
-    if (!resolvedPlaceId && cidade) {
-      console.log(`[LP HOTELS] google_place_id vazio, buscando via GetCities para "${cidade}"...`);
+    const payload = {
+      destination: cidade || '',
+      checkIn: checkIn || '',
+      checkOut: checkOut || '',
+      adults: adultsCount,
+    };
+
+    console.log(`[LP HOTELS] n8n webhook destination="${cidade}" payload:`, JSON.stringify(payload));
+
+    const N8N_TIMEOUT_MS = 20000;
+    const N8N_MAX_ATTEMPTS = 2;
+    let response = null;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= N8N_MAX_ATTEMPTS; attempt++) {
       try {
-        const citiesPayload = {};
-        if (cidade) citiesPayload.cidade = cidade;
-        if (uf) citiesPayload.uf = uf;
-        const citiesRes = await fetch(`${COOBMAIS_BASE_URL}/Book/GetCities`, {
+        response = await fetch(N8N_HOTELS_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await ensureCoobToken()}` },
-          body: JSON.stringify(citiesPayload),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(N8N_TIMEOUT_MS),
         });
-        const citiesData = await citiesRes.json();
-        const citiesList = Array.isArray(citiesData) ? citiesData : (citiesData.data || citiesData.cities || []);
-        if (citiesList.length > 0 && citiesList[0].google_place_id) {
-          resolvedPlaceId = citiesList[0].google_place_id;
-          console.log(`[LP HOTELS] google_place_id resolvido: ${resolvedPlaceId} (${citiesList[0].city || citiesList[0].cidade || cidade})`);
-        } else {
-          console.warn(`[LP HOTELS] GetCities não retornou google_place_id para "${cidade}"`);
+        if (!response.ok) {
+          throw new Error(`n8n respondeu HTTP ${response.status}`);
         }
-      } catch (e) {
-        console.warn(`[LP HOTELS] Falha ao resolver google_place_id: ${e.message}`);
+        break;
+      } catch (err) {
+        lastError = err;
+        const isTimeout = err.name === 'TimeoutError' || err.name === 'AbortError';
+        console.warn(`[LP HOTELS] Tentativa ${attempt}/${N8N_MAX_ATTEMPTS} falhou${isTimeout ? ' (timeout)' : ''}:`, err.message);
+        response = null;
+        if (attempt < N8N_MAX_ATTEMPTS) {
+          await new Promise(r => setTimeout(r, 500));
+        }
       }
     }
 
-    const payload = {
-      google_place_id: resolvedPlaceId,
-      start_date: checkIn || '',
-      end_date: checkOut || '',
-      adults: Math.max(2, parseInt(adults) || 2),
-      children: childrenCount,
-      rooms: parseInt(rooms) || 1
-    };
-
-    console.log(`[LP HOTELS] cidade="${cidade}" google_place_id="${resolvedPlaceId}" payload:`, JSON.stringify(payload));
-
-    const response = await fetch(`${COOBMAIS_BASE_URL}/Book/GetHotels`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await ensureCoobToken()}`
-      },
-      body: JSON.stringify(payload)
-    });
+    if (!response) {
+      const isTimeout = lastError && (lastError.name === 'TimeoutError' || lastError.name === 'AbortError');
+      return res.status(504).json({
+        ok: false,
+        error: isTimeout
+          ? 'A busca de hospedagens está demorando mais que o esperado. Tente novamente em instantes.'
+          : 'Não foi possível buscar hospedagens no momento. Tente novamente em instantes.',
+        detail: lastError ? lastError.message : 'n8n indisponível',
+      });
+    }
 
     const data = await response.json();
-    const accommodations = data.accommodations || data.data || [];
-    console.log('[LP HOTELS] Found', accommodations.length, 'accommodations');
+    let accommodations = [];
+    if (Array.isArray(data)) {
+      accommodations = data[0]?.accommodations || [];
+    } else if (data && typeof data === 'object') {
+      accommodations = data.accommodations || data.data || [];
+    }
+    if (!Array.isArray(accommodations)) accommodations = [];
+    console.log('[LP HOTELS] Found', accommodations.length, 'accommodations (n8n)');
 
     let highSeasonMonths = [1, 2, 7, 12];
     try {
@@ -5329,8 +5369,79 @@ app.get('/api/health', async (req, res) => {
 
 const PORT = process.env.PORT || (isProduction ? 5000 : (process.env.TOTVS_PROXY_PORT || 3001));
 
+// Aplica apiConfigOverrides (carregado do banco/JSON) nas variáveis de runtime.
+// Precedência da Vindi: override explícito no banco vence; sem override, usa VINDI_API_KEY do .env.
+function applyApiConfigOverrides() {
+  const o = apiConfigOverrides || {};
+  if (o.TOTVS?.token) TOTVS_AUTH = o.TOTVS.token;
+  if (o.TOTVS?.baseUrl) {
+    try { const u = new URL(o.TOTVS.baseUrl); TOTVS_URL = u.hostname; TOTVS_PORT = parseInt(u.port) || 443; } catch (_) {}
+  }
+  if (o.Coobmais?.baseUrl) COOBMAIS_BASE_URL = o.Coobmais.baseUrl.replace(/\/+$/, '');
+  if (o.Coobmais?.authUrl) COOBMAIS_AUTH_URL = o.Coobmais.authUrl;
+  if (o.Coobmais?.accessKey) COOBMAIS_ACCESS_KEY = o.Coobmais.accessKey;
+  if (o.Coobmais?.password) COOBMAIS_PASSWORD = o.Coobmais.password;
+  if (o.Coobmais?.token) {
+    COOBMAIS_TOKEN = o.Coobmais.token;
+    try {
+      const payload = JSON.parse(Buffer.from(COOBMAIS_TOKEN.split('.')[1] + '==', 'base64').toString());
+      coobmaisTokenExp = (payload.exp || 0) * 1000;
+    } catch (_) {
+      coobmaisTokenExp = (COOBMAIS_ACCESS_KEY && COOBMAIS_PASSWORD) ? Date.now() + 60 * 60 * 1000 : Date.now() + 30 * 24 * 60 * 60 * 1000;
+    }
+  }
+  SERP_API_KEY = o.SerpAPI?.token || process.env.SERP_API_KEY;
+  VINDI_API_KEY = o.Vindi?.token || process.env.VINDI_API_KEY;
+  if (o.Vindi?.productId) VINDI_PRODUCT_ID = parseInt(o.Vindi.productId);
+  if (o.Vindi?.baseUrl) {
+    try { const u = new URL(o.Vindi.baseUrl); VINDI_BASE_URL = u.hostname; } catch (_) {}
+  }
+}
+
+// Persiste a config da Central de APIs no banco (system_config key 'api_config'),
+// que fica fora do container e sobrevive a redeploys.
+async function saveApiConfigToDb() {
+  await query(
+    "INSERT INTO system_config (key, value, updated_at) VALUES ('api_config', $1, NOW()) ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()",
+    [JSON.stringify(apiConfigOverrides || {})]
+  );
+}
+
+// Carrega a config do banco no startup. Na primeira subida (banco vazio),
+// migra o api-config.json existente — descartando o token da Vindi para não
+// reintroduzir uma chave antiga/incorreta que causaria HTTP 401.
+async function loadApiConfigFromDb() {
+  try {
+    const result = await query("SELECT value FROM system_config WHERE key = 'api_config'");
+    const dbConfig = result.rows.length > 0 ? result.rows[0].value : null;
+    if (dbConfig && typeof dbConfig === 'object' && Object.keys(dbConfig).length > 0) {
+      apiConfigOverrides = dbConfig;
+      applyApiConfigOverrides();
+      console.log('[API Config] Carregada do banco de dados');
+      return;
+    }
+    const jsonConfig = { ...apiConfigOverrides };
+    if (jsonConfig.Vindi) {
+      const { token, ...rest } = jsonConfig.Vindi;
+      jsonConfig.Vindi = rest;
+      if (Object.keys(jsonConfig.Vindi).length === 0) delete jsonConfig.Vindi;
+    }
+    if (Object.keys(jsonConfig).length > 0) {
+      apiConfigOverrides = jsonConfig;
+      await saveApiConfigToDb();
+      console.log('[API Config] Migrada do api-config.json para o banco (token Vindi descartado)');
+    } else {
+      apiConfigOverrides = {};
+    }
+    applyApiConfigOverrides();
+  } catch (e) {
+    console.error('[API Config] Falha ao carregar do banco:', e.message);
+  }
+}
+
 (async () => {
   await initializeDatabase();
+  await loadApiConfigFromDb();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT} (${isProduction ? 'production' : 'development'})`);
     console.log(`Sync service: ${syncService.enabled ? 'ENABLED' : 'DISABLED'}`);
