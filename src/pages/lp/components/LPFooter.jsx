@@ -53,13 +53,13 @@ export default function LPFooter() {
           <div>
             <h4 className="font-semibold text-sm mb-4 text-white">Atendimento</h4>
             <a
-              href="https://wa.me/555130273375"
+              href="https://wa.me/5554994576992"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/20 text-emerald-300 hover:text-emerald-200 text-sm font-medium transition-all"
             >
               <MessageCircle className="w-4 h-4" />
-              WhatsApp: (51) 3027-3375
+              WhatsApp: (54) 9457-6992
             </a>
           </div>
         </div>

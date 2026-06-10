@@ -1,6 +1,6 @@
 import { MessageCircle } from 'lucide-react';
 
-export default function WhatsAppFloat({ phone = '555130273375', message = 'Olá! Gostaria de mais informações sobre a Unyco.' }) {
+export default function WhatsAppFloat({ phone = '5554994576992', message = 'Olá! Gostaria de mais informações sobre a Unyco.' }) {
   const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 
   return (
