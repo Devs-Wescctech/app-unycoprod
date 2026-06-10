@@ -2282,6 +2282,47 @@ async function getHotelCategory(hotelId) {
   }
 }
 
+// Fallback de busca direto na Coobmais (GetCities + GetHotels), usado quando o
+// webhook n8n falha (rede/timeout) ou não retorna hotéis. Mantém o mesmo formato
+// de `accommodations` esperado pelo restante do endpoint.
+async function fetchHotelsFromCoobmais({ cidade, uf, google_place_id, checkIn, checkOut, adults, children }) {
+  if (!checkIn || !checkOut) return [];
+
+  let placeId = google_place_id;
+  if (!placeId && cidade) {
+    const cityPayload = { cidade };
+    if (uf) cityPayload.uf = uf;
+    const cr = await fetch(`${COOBMAIS_BASE_URL}/Book/GetCities`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await ensureCoobToken()}` },
+      body: JSON.stringify(cityPayload),
+    });
+    if (cr.ok) {
+      const list = await cr.json();
+      if (Array.isArray(list) && list.length > 0) placeId = list[0].google_place_id;
+    }
+  }
+  if (!placeId) return [];
+
+  const r = await fetch(`${COOBMAIS_BASE_URL}/Book/GetHotels`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await ensureCoobToken()}` },
+    body: JSON.stringify({
+      start_date: checkIn,
+      end_date: checkOut,
+      adults: Math.max(1, parseInt(adults) || 2),
+      children: parseInt(children) || 0,
+      children_age: 0,
+      google_place_id: placeId,
+      qtde_linhas: 50,
+    }),
+  });
+  if (!r.ok) throw new Error(`Coobmais GetHotels HTTP ${r.status}`);
+  const data = await r.json();
+  const acc = data.accommodations || data.data || [];
+  return Array.isArray(acc) ? acc : [];
+}
+
 app.post('/api/lp/hotels', async (req, res) => {
   try {
     const { cidade, uf, checkIn, checkOut, adults, children, rooms, google_place_id, cidade_id } = req.body;
@@ -2327,7 +2368,36 @@ app.post('/api/lp/hotels', async (req, res) => {
       }
     }
 
-    if (!response) {
+    let accommodations = [];
+    if (response) {
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        accommodations = data[0]?.accommodations || [];
+      } else if (data && typeof data === 'object') {
+        accommodations = data.accommodations || data.data || [];
+      }
+      if (!Array.isArray(accommodations)) accommodations = [];
+      console.log('[LP HOTELS] Found', accommodations.length, 'accommodations (n8n)');
+    }
+
+    // Fallback Coobmais: quando o n8n falha (rede/timeout) ou retorna vazio,
+    // busca direto na Coobmais para não deixar a busca sem resultados.
+    if (!response || accommodations.length === 0) {
+      try {
+        const coobHotels = await fetchHotelsFromCoobmais({
+          cidade, uf, google_place_id,
+          checkIn, checkOut, adults: adultsCount, children: childrenCount,
+        });
+        if (Array.isArray(coobHotels) && coobHotels.length > 0) {
+          accommodations = coobHotels;
+          console.log('[LP HOTELS] Fallback Coobmais retornou', accommodations.length, 'accommodations');
+        }
+      } catch (fbErr) {
+        console.warn('[LP HOTELS] Fallback Coobmais falhou:', fbErr.message);
+      }
+    }
+
+    if (!response && accommodations.length === 0) {
       const isTimeout = lastError && (lastError.name === 'TimeoutError' || lastError.name === 'AbortError');
       return res.status(504).json({
         ok: false,
@@ -2337,16 +2407,6 @@ app.post('/api/lp/hotels', async (req, res) => {
         detail: lastError ? lastError.message : 'n8n indisponível',
       });
     }
-
-    const data = await response.json();
-    let accommodations = [];
-    if (Array.isArray(data)) {
-      accommodations = data[0]?.accommodations || [];
-    } else if (data && typeof data === 'object') {
-      accommodations = data.accommodations || data.data || [];
-    }
-    if (!Array.isArray(accommodations)) accommodations = [];
-    console.log('[LP HOTELS] Found', accommodations.length, 'accommodations (n8n)');
 
     let highSeasonMonths = [1, 2, 7, 12];
     try {
