@@ -899,8 +899,12 @@ app.post('/api/subscriptions.php', async (req, res) => {
       if (input.user_id !== undefined) { fields.push(`user_id = $${paramIndex++}`); params.push(parseInt(input.user_id)); }
       if (input.plan_id !== undefined) {
         let planId = input.plan_id;
-        if (planId === '' || planId === 0 || planId === '0') planId = null;
-        else planId = parseInt(planId);
+        if (planId === '' || planId === null || planId === 0 || planId === '0') {
+          planId = null;
+        } else {
+          planId = parseInt(planId);
+          if (Number.isNaN(planId)) planId = null;
+        }
         fields.push(`plan_id = $${paramIndex++}`);
         params.push(planId);
       }
@@ -3855,7 +3859,13 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
     if (b.status === 'cancelled') return res.json({ ok: true, data: b, message: 'Reserva já cancelada' });
 
     const cancelToken = b.booking_code || b.localizador;
-    console.log('[LP BOOKINGS] Cancel using token (booking_code):', cancelToken, 'localizador:', b.localizador);
+    const vfbId = await getAssociateNic(BOOKING_CNPJ);
+    console.log('[LP BOOKINGS] Cancel using token (booking_code):', cancelToken, 'localizador:', b.localizador, 'cnpj:', BOOKING_CNPJ.substring(0, 4) + '***', 'vfb:', vfbId || 'NULL');
+
+    if (!vfbId) {
+      console.log('[LP BOOKINGS] Associate not found for CNPJ, cannot cancel');
+      return res.json({ ok: false, error: 'O cadastro institucional não está vinculado ao sistema de reservas. Entre em contato com o suporte.' });
+    }
 
     let bookingCancelOk = false;
     let bookingCancelMsg = '';
@@ -3866,7 +3876,11 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${await ensureCoobToken()}`
         },
-        body: JSON.stringify({ token: cancelToken })
+        body: JSON.stringify({
+          token: cancelToken,
+          cpf: BOOKING_CNPJ,
+          vfb_identifier: vfbId
+        })
       });
       const cancelText = await cancelRes.text();
       console.log('[LP BOOKINGS] Cancel API raw response:', cancelText, 'status:', cancelRes.status);

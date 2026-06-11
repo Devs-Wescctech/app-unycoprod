@@ -183,30 +183,9 @@ export default function DrawerCadastro({ isOpen, onClose, onSuccess, mode, cadas
   }, [cadastro, mode, isOpen]);
 
   const handleSave = async () => {
-    const camposObrigatorios = [
-      { campo: 'nome', label: 'Nome' },
-      { campo: 'sobrenome', label: 'Sobrenome' },
-      { campo: 'cpf', label: 'CPF' },
-      { campo: 'email', label: 'E-mail' },
-      { campo: 'telefone', label: 'Telefone' },
-      { campo: 'nascimento', label: 'Data de Nascimento' },
-      { campo: 'cep', label: 'CEP' },
-      { campo: 'endereco', label: 'Endereço' },
-      { campo: 'numero', label: 'Número' },
-      { campo: 'bairro', label: 'Bairro' },
-      { campo: 'cidade', label: 'Cidade' },
-      { campo: 'estado', label: 'Estado' }
-    ];
-    
-    const camposFaltando = camposObrigatorios.filter(c => !formData[c.campo] || formData[c.campo].trim() === '');
-    
-    if (camposFaltando.length > 0) {
-      const labels = camposFaltando.map(c => c.label).join(', ');
-      toast({ title: 'Campos obrigatórios', description: `Preencha: ${labels}`, variant: 'destructive' });
-      return;
-    }
-
+    const isEditingExisting = mode === 'edit' && !!cadastro?.id;
     const wantsToSetPassword = canEditPassword && (password.length > 0 || passwordConfirm.length > 0);
+
     if (wantsToSetPassword) {
       if (password.length < PASSWORD_MIN_LENGTH) {
         toast({ title: 'Senha inválida', description: `A senha deve ter no mínimo ${PASSWORD_MIN_LENGTH} caracteres`, variant: 'destructive' });
@@ -218,24 +197,84 @@ export default function DrawerCadastro({ isOpen, onClose, onSuccess, mode, cadas
       }
     }
 
+    // A troca de senha de um cadastro existente é uma operação que pode prosseguir
+    // mesmo com o perfil incompleto (cadastros antigos costumam ter campos vazios).
+    // Nesse caso, exigimos apenas o nome (necessário para não apagar o nome no update).
+    const passwordOnlyForExisting = isEditingExisting && wantsToSetPassword;
+
+    if (passwordOnlyForExisting) {
+      if (!formData.nome || formData.nome.trim() === '') {
+        toast({ title: 'Nome obrigatório', description: 'Informe ao menos o nome para salvar a alteração de senha.', variant: 'destructive' });
+        return;
+      }
+    } else {
+      const camposObrigatorios = [
+        { campo: 'nome', label: 'Nome' },
+        { campo: 'sobrenome', label: 'Sobrenome' },
+        { campo: 'cpf', label: 'CPF' },
+        { campo: 'email', label: 'E-mail' },
+        { campo: 'telefone', label: 'Telefone' },
+        { campo: 'nascimento', label: 'Data de Nascimento' },
+        { campo: 'cep', label: 'CEP' },
+        { campo: 'endereco', label: 'Endereço' },
+        { campo: 'numero', label: 'Número' },
+        { campo: 'bairro', label: 'Bairro' },
+        { campo: 'cidade', label: 'Cidade' },
+        { campo: 'estado', label: 'Estado' }
+      ];
+
+      const camposFaltando = camposObrigatorios.filter(c => !formData[c.campo] || formData[c.campo].trim() === '');
+
+      if (camposFaltando.length > 0) {
+        const labels = camposFaltando.map(c => c.label).join(', ');
+        toast({ title: 'Campos obrigatórios', description: `Preencha: ${labels}`, variant: 'destructive' });
+        return;
+      }
+    }
+
     setIsSaving(true);
 
     try {
       const fullName = `${formData.nome} ${formData.sobrenome}`.trim();
-      
-      const userPayload = {
-        name: fullName,
-        cpf: formData.cpf.replace(/\D/g, ''),
-        phone: formData.telefone,
-        email: formData.email,
-        cep: formData.cep,
-        birth_date: formData.nascimento,
-        address: formData.endereco,
-        numero: formData.numero,
-        bairro: formData.bairro,
-        cidade: formData.cidade,
-        estado: formData.estado
-      };
+
+      let userPayload;
+      if (passwordOnlyForExisting) {
+        // Cadastro existente com perfil possivelmente incompleto: enviamos apenas os
+        // campos preenchidos para não sobrescrever dados com vazios nem quebrar
+        // colunas tipadas (ex.: birth_date como DATE não aceita string vazia).
+        userPayload = { name: fullName };
+        const optionalFields = {
+          cpf: formData.cpf ? formData.cpf.replace(/\D/g, '') : '',
+          phone: formData.telefone,
+          email: formData.email,
+          cep: formData.cep,
+          birth_date: formData.nascimento,
+          address: formData.endereco,
+          numero: formData.numero,
+          bairro: formData.bairro,
+          cidade: formData.cidade,
+          estado: formData.estado
+        };
+        Object.entries(optionalFields).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && String(value).trim() !== '') {
+            userPayload[key] = value;
+          }
+        });
+      } else {
+        userPayload = {
+          name: fullName,
+          cpf: formData.cpf.replace(/\D/g, ''),
+          phone: formData.telefone,
+          email: formData.email,
+          cep: formData.cep,
+          birth_date: formData.nascimento,
+          address: formData.endereco,
+          numero: formData.numero,
+          bairro: formData.bairro,
+          cidade: formData.cidade,
+          estado: formData.estado
+        };
+      }
 
       if (wantsToSetPassword) {
         userPayload.password = password;
