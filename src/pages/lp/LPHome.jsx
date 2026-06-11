@@ -53,6 +53,7 @@ export default function LPHome() {
   const lastDragXRef = useRef(0);
   const dragMovedRef = useRef(false);
   const initializedRef = useRef(false);
+  const scrollPosRef = useRef(0);
   const ITEMS_PER_PAGE = 8;
 
   useEffect(() => {
@@ -81,14 +82,20 @@ export default function LPHome() {
         const copyWidth = el.scrollWidth / 3;
         if (copyWidth <= 0) return;
         if (!initializedRef.current) {
+          scrollPosRef.current = copyWidth;
           el.scrollLeft = copyWidth;
           initializedRef.current = true;
         }
-        if (!isDraggingRef.current && !isPausedRef.current) {
-          el.scrollLeft += SPEED * (dt / 16);
+        if (isDraggingRef.current) {
+          if (el.scrollLeft >= copyWidth * 2) el.scrollLeft -= copyWidth;
+          else if (el.scrollLeft < copyWidth * 0.5) el.scrollLeft += copyWidth;
+          scrollPosRef.current = el.scrollLeft;
+        } else {
+          if (!isPausedRef.current) scrollPosRef.current += SPEED * (dt / 16);
+          if (scrollPosRef.current >= copyWidth * 2) scrollPosRef.current -= copyWidth;
+          else if (scrollPosRef.current < copyWidth * 0.5) scrollPosRef.current += copyWidth;
+          el.scrollLeft = scrollPosRef.current;
         }
-        if (el.scrollLeft >= copyWidth * 2) el.scrollLeft -= copyWidth;
-        else if (el.scrollLeft < copyWidth * 0.5) el.scrollLeft += copyWidth;
       } catch {}
     };
     raf = requestAnimationFrame(tick);
