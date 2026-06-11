@@ -2,3 +2,6 @@
 - [Hero video single-click unmute](hero-video-mute.md) — vídeo re-mutava sozinho: ref callback inline, prop `muted` no JSX e `onCanPlay` forçando mudo; setup imperativo via useEffect único.
 - [Central de APIs persistence & Vindi 401](api-config-persistence.md) — configs em `system_config.api_config` (DB, não JSON do container); migração descarta token Vindi; precedência Vindi = override DB > .env.
 - [Tarifas por categoria sazonais](category-rates-seasonal.md) — Diamante não é mais valor fixo; todas usam low/high season com mesma fórmula em backend, BookingFlow, AlternativesModal e admin.
+- [Email flow hotel recipient](email-flow-hotel-recipient.md) — nó de e-mail tem recipient_type (client/hotel/both); hotel email via Coobmais GetBookDetails→fallback InfoHotels; campo exato em GetBookDetails não confirmado.
+- [Coobmais hotel main image 01.jpg may 404](coobmais-hotel-images.md) — usar photos[] de InfoHotels como fonte; resolver imagem no backend (cache de categoria), não reconstruir 01.jpg.
+- [LP hotels by_request filtering](lp-hotels-by-request.md) — InfoApartment filter drops hotels sem disponibilidade imediata; by_request hotéis devem ser mantidos e ter cost sintetizado p/ aplicar tarifa CRM.

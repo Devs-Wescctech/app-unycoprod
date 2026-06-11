@@ -168,7 +168,7 @@ function StepIndicator({ currentStep }) {
   );
 }
 
-export default function BookingFlow({ hotel, searchParams, user, open, onClose, onUserUpdate }) {
+export default function BookingFlow({ hotel, searchParams, user, open, onClose, onUserUpdate, authOpen = false }) {
   const [step, setStep] = useState(1);
   const [apartments, setApartments] = useState([]);
   const [loadingApartments, setLoadingApartments] = useState(false);
@@ -438,12 +438,12 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(v) => { if (!v && !alternativesModalOpen) handleClose(); }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !alternativesModalOpen && !authOpen) handleClose(); }}>
       <DialogContent
         className="max-w-2xl max-h-[92vh] overflow-y-auto p-0 gap-0 rounded-2xl border-0 shadow-2xl bg-white mx-2 sm:mx-auto"
-        onInteractOutside={(e) => { if (alternativesModalOpen) e.preventDefault(); }}
-        onEscapeKeyDown={(e) => { if (alternativesModalOpen) e.preventDefault(); }}
-        onPointerDownOutside={(e) => { if (alternativesModalOpen) e.preventDefault(); }}>
+        onInteractOutside={(e) => { if (alternativesModalOpen || authOpen) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (alternativesModalOpen || authOpen) e.preventDefault(); }}
+        onPointerDownOutside={(e) => { if (alternativesModalOpen || authOpen) e.preventDefault(); }}>
         <DialogHeader className="sr-only">
           <DialogTitle>Reservar hospedagem</DialogTitle>
           <DialogDescription>Fluxo de reserva</DialogDescription>

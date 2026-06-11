@@ -247,9 +247,10 @@ export default function CentralAPIs() {
   const [lastRefresh, setLastRefresh] = useState(null);
   const [autoRefreshCountdown, setAutoRefreshCountdown] = useState(60);
   const [editingApi, setEditingApi] = useState(null);
-  const [editForm, setEditForm] = useState({ baseUrl: '', token: '', username: '', password: '', accessKey: '', authUrl: '' });
+  const [editForm, setEditForm] = useState({ baseUrl: '', token: '', username: '', password: '', accessKey: '', authUrl: '', cancelPassword: '' });
   const [showToken, setShowToken] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showCancelPassword, setShowCancelPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [apiConfig, setApiConfig] = useState({});
   const [coobTokenInfo, setCoobTokenInfo] = useState(null);
@@ -375,10 +376,12 @@ export default function CentralAPIs() {
       username: '',
       password: '',
       accessKey: '',
-      authUrl: config.authUrl || api.authUrl || ''
+      authUrl: config.authUrl || api.authUrl || '',
+      cancelPassword: ''
     });
     setShowToken(false);
     setShowPassword(false);
+    setShowCancelPassword(false);
     setShowFullToken(false);
     setCoobTokenInfo(null);
     setEditingApi(api);
@@ -394,6 +397,7 @@ export default function CentralAPIs() {
         if (editForm.authUrl) payload.authUrl = editForm.authUrl;
         if (editForm.accessKey) payload.accessKey = editForm.accessKey;
         if (editForm.password) payload.password = editForm.password;
+        if (editForm.cancelPassword) payload.cancelPassword = editForm.cancelPassword;
       } else if (isBasicAuth(editingApi)) {
         if (editForm.username && editForm.password) {
           payload.username = editForm.username;
@@ -679,6 +683,26 @@ export default function CentralAPIs() {
                     </button>
                   </div>
                   <p className="text-xs text-slate-400 mt-1.5">Deixe em branco para manter o valor atual</p>
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-slate-700 mb-2 block">Senha do Associado (cancelamento)</label>
+                  <div className="relative">
+                    <input
+                      type={showCancelPassword ? 'text' : 'password'}
+                      value={editForm.cancelPassword}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, cancelPassword: e.target.value }))}
+                      className="w-full px-4 py-2.5 pr-12 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                      placeholder={apiConfig?.Coobmais?.cancelPassword || 'Senha do associado para cancelar reservas'}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCancelPassword(!showCancelPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-slate-100 rounded-lg transition-colors"
+                    >
+                      {showCancelPassword ? <EyeOff className="w-4 h-4 text-slate-400" /> : <Eye className="w-4 h-4 text-slate-400" />}
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1.5">Usada apenas no cancelamento de reservas. Deixe em branco para manter o valor atual.</p>
                 </div>
 
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">

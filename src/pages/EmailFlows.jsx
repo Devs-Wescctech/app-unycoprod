@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Mail, Plus, Zap, Power, PowerOff, Clock, Send, Pencil, Trash2, X, Loader2, ChevronDown, Eye, CheckCircle2, AlertCircle, History, Search, Hotel, XCircle, Timer, Star, CreditCard, Coins, PartyPopper, UserCheck, Variable, Workflow, Bot, Download, Inbox, ToggleLeft, ToggleRight, GripVertical, ArrowDown, MessageSquare, Settings2, Code, Type, AtSign } from 'lucide-react';
+import { Mail, Plus, Zap, Power, PowerOff, Clock, Send, Pencil, Trash2, X, Loader2, ChevronDown, Eye, CheckCircle2, AlertCircle, History, Search, Hotel, XCircle, Timer, Star, CreditCard, Coins, PartyPopper, UserCheck, Variable, Workflow, Bot, Download, Inbox, ToggleLeft, ToggleRight, GripVertical, ArrowDown, MessageSquare, Settings2, Code, Type, AtSign, Users } from 'lucide-react';
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import DOMPurify from 'dompurify';
 import PageHeader from '@/components/ui/PageHeader';
@@ -289,6 +289,34 @@ function VisualNode({ type, data, isLast, onUpdate, onRemove, canRemove, isDragg
                 {type === 'message' && (
                   <div className="space-y-3">
                     <div>
+                      <label className="text-[11px] font-semibold text-slate-500 mb-1.5 block uppercase tracking-wider">Destinatário</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { value: 'client', label: 'Cliente', Icon: UserCheck },
+                          { value: 'hotel', label: 'Hotel', Icon: Hotel },
+                          { value: 'both', label: 'Ambos', Icon: Users },
+                        ].map(opt => {
+                          const OptIcon = opt.Icon;
+                          const active = (data.recipient_type || 'client') === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              onClick={() => onUpdate({ recipient_type: opt.value })}
+                              className={`flex items-center justify-center gap-1.5 p-2 rounded-xl text-xs font-medium transition-all ${
+                                active
+                                  ? 'bg-[#2e6299]/10 text-[#2e6299] ring-1 ring-[#2e6299]/40'
+                                  : 'bg-slate-50 text-slate-500 hover:bg-slate-100'
+                              }`}
+                            >
+                              <OptIcon className="w-3.5 h-3.5" />
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1.5">O e-mail do hotel é obtido automaticamente pelo localizador da reserva.</p>
+                    </div>
+                    <div>
                       <div className="flex items-center justify-between mb-1.5">
                         <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">{isHtml ? 'Corpo do E-mail (HTML)' : 'Corpo do E-mail'}</label>
                         <span className="text-[10px] text-slate-400">{(data.message_template || '').length} caracteres</span>
@@ -417,7 +445,7 @@ function VisualFlowBuilder({ flow, onSave, onClose, saving }) {
     const newNode = {
       id: `${type}_${Date.now()}`,
       type,
-      data: type === 'delay' ? { delay_minutes: 60 } : type === 'message' ? { message_template: '' } : {},
+      data: type === 'delay' ? { delay_minutes: 60 } : type === 'message' ? { message_template: '', recipient_type: 'client' } : {},
     };
     setNodes(prev => {
       const next = [...prev];

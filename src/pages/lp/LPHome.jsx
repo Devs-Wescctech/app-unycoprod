@@ -933,6 +933,7 @@ export default function LPHome() {
         onClose={() => setModalOpen(false)}
         searchParams={searchParams}
         onBooking={handleBooking}
+        authOpen={!!authModal}
       />
 
       <BookingFlow
@@ -942,6 +943,7 @@ export default function LPHome() {
         open={bookingOpen}
         onClose={() => setBookingOpen(false)}
         onUserUpdate={setUser}
+        authOpen={!!authModal}
       />
 
       <WhatsAppFloat />

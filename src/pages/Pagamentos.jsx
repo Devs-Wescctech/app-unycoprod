@@ -4,8 +4,12 @@ import {
   Wallet, CreditCard, FileText, Search, RefreshCw, Loader2,
   ExternalLink, ChevronLeft, ChevronRight, Filter, ChevronDown, ChevronUp,
   DollarSign, Clock, CheckCircle2, XCircle, AlertCircle, Eye,
-  Receipt, Building2, User, Calendar, Hash, ArrowUpDown, QrCode
+  Receipt, Building2, User, Calendar, Hash, ArrowUpDown, QrCode, Ban
 } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
@@ -62,6 +66,8 @@ export default function Pagamentos() {
   const [refreshingId, setRefreshingId] = useState(null);
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [vindiHealth, setVindiHealth] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
 
   const fetchPayments = useCallback(async (page = 1) => {
     setLoading(true);
@@ -125,6 +131,29 @@ export default function Pagamentos() {
       toast.error('Erro ao comunicar com a Vindi');
     } finally {
       setRefreshingId(null);
+    }
+  };
+
+  const handleCancelBooking = async () => {
+    if (!cancelTarget) return;
+    const paymentId = cancelTarget.id;
+    setCancellingId(paymentId);
+    try {
+      const res = await fetch(`/api/payments/${paymentId}/cancel-booking`, { method: 'PATCH' });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(data.message || 'Reserva cancelada com sucesso');
+        setCancelTarget(null);
+        fetchPayments(pagination.page);
+      } else {
+        toast.error(data.error || 'Erro ao cancelar reserva');
+        setCancelTarget(null);
+      }
+    } catch {
+      toast.error('Erro de conexao ao cancelar reserva');
+      setCancelTarget(null);
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -421,6 +450,20 @@ export default function Pagamentos() {
                                 <ExternalLink className="w-4 h-4" />
                               </a>
                             )}
+                            {payment.status !== 'canceled' && payment.status !== 'cancelled' && (
+                              <button
+                                onClick={() => setCancelTarget(payment)}
+                                disabled={cancellingId === payment.id}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all disabled:opacity-50"
+                                title="Cancelar reserva"
+                              >
+                                {cancellingId === payment.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Ban className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
                           </div>
                         </td>
                       </motion.tr>
@@ -489,6 +532,40 @@ export default function Pagamentos() {
           <PaymentDetailModal payment={selectedPayment} onClose={() => setSelectedPayment(null)} onRefresh={() => { handleRefreshStatus(selectedPayment.id); }} refreshing={refreshingId === selectedPayment.id} />
         )}
       </AnimatePresence>
+
+      <AlertDialog open={!!cancelTarget} onOpenChange={(open) => { if (!open && !cancellingId) setCancelTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancelar reserva?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {cancelTarget && (
+                <>
+                  Esta ação cancela a reserva na operadora Coobmais e a cobrança na Vindi.
+                  {cancelTarget.booking_locator && (
+                    <> Localizador <span className="font-mono font-semibold">{cancelTarget.booking_locator}</span></>
+                  )}
+                  {cancelTarget.guest_name && <> de <span className="font-semibold">{cancelTarget.guest_name}</span></>}
+                  . Esta operação não pode ser desfeita.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!cancellingId}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleCancelBooking(); }}
+              disabled={!!cancellingId}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {cancellingId ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Cancelando...</>
+              ) : (
+                'Cancelar reserva'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

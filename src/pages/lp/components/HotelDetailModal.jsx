@@ -66,7 +66,7 @@ function getAmenityIcon(amenity) {
   return ShieldCheck;
 }
 
-export default function HotelDetailModal({ hotel, open, onClose, searchParams, onBooking }) {
+export default function HotelDetailModal({ hotel, open, onClose, searchParams, onBooking, authOpen = false }) {
   const [currentPhoto, setCurrentPhoto] = useState(0);
   const [details, setDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -90,7 +90,7 @@ export default function HotelDetailModal({ hotel, open, onClose, searchParams, o
 
   if (!hotel) return null;
 
-  const detailPhotos = details?.photos?.length ? [hotel.image, ...details.photos] : [];
+  const detailPhotos = details?.photos?.length ? details.photos : [];
   const fallbackPhotos = hotel.image ? [hotel.image] : [FALLBACK_IMG];
   const photos = detailPhotos.length > 0 ? [...new Set(detailPhotos)].filter(Boolean) : fallbackPhotos;
   const safeIndex = Math.min(currentPhoto, Math.max(0, photos.length - 1));
@@ -132,6 +132,7 @@ export default function HotelDetailModal({ hotel, open, onClose, searchParams, o
 
   const handleOpenChange = (isOpen) => {
     if (!isOpen) {
+      if (authOpen) return;
       setCurrentPhoto(0);
       setDetails(null);
       onClose();
@@ -140,7 +141,11 @@ export default function HotelDetailModal({ hotel, open, onClose, searchParams, o
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-0 rounded-2xl border-0 shadow-2xl mx-2 sm:mx-auto">
+      <DialogContent
+        className="max-w-4xl max-h-[90vh] overflow-y-auto p-0 rounded-2xl border-0 shadow-2xl mx-2 sm:mx-auto"
+        onInteractOutside={(e) => { if (authOpen) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => { if (authOpen) e.preventDefault(); }}
+        onPointerDownOutside={(e) => { if (authOpen) e.preventDefault(); }}>
         <DialogHeader className="sr-only">
           <DialogTitle>Detalhes do hotel</DialogTitle>
           <DialogDescription>Informações detalhadas sobre o hotel selecionado</DialogDescription>

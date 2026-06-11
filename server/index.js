@@ -1643,6 +1643,7 @@ app.get('/api/central/config', (req, res) => {
     if (safeConfig[key].token) safeConfig[key].token = mask(safeConfig[key].token);
     if (safeConfig[key].accessKey) safeConfig[key].accessKey = mask(safeConfig[key].accessKey);
     if (safeConfig[key].password) safeConfig[key].password = mask(safeConfig[key].password);
+    if (safeConfig[key].cancelPassword) safeConfig[key].cancelPassword = mask(safeConfig[key].cancelPassword);
   }
   res.json({ success: true, config: safeConfig });
 });
@@ -1729,8 +1730,12 @@ app.put('/api/central/apis/:name', async (req, res) => {
     if (token !== undefined) apiConfigOverrides[name].token = token;
 
     if (name === 'Coobmais') {
-      const { accessKey, password: coobPwd, authUrl } = req.body;
+      const { accessKey, password: coobPwd, authUrl, cancelPassword } = req.body;
       let credsChanged = false;
+      if (cancelPassword !== undefined && cancelPassword !== '' && !cancelPassword.startsWith('••••')) {
+        apiConfigOverrides[name].cancelPassword = cancelPassword;
+        COOBMAIS_CANCEL_PASSWORD = cancelPassword;
+      }
       if (accessKey !== undefined && accessKey !== '') {
         apiConfigOverrides[name].accessKey = accessKey;
         COOBMAIS_ACCESS_KEY = accessKey;
@@ -1876,11 +1881,11 @@ function parseLpToken(req) {
 }
 
 let COOBMAIS_TOKEN = process.env.COOBMAIS_TOKEN || '';
-const N8N_HOTELS_URL = process.env.N8N_HOTELS_URL || 'https://n8n.wescctech.com.br/webhook/busca-hoteis';
 let COOBMAIS_BASE_URL = process.env.COOBMAIS_BASE_URL || 'https://apiprod.coobmais.com.br/unico/api';
 let COOBMAIS_AUTH_URL = process.env.COOBMAIS_AUTH_URL || 'https://apiprod.coobmais.com.br/auth/api/Users/Authenticate';
 let COOBMAIS_ACCESS_KEY = process.env.COOBMAIS_ACCESS_KEY || '';
 let COOBMAIS_PASSWORD = process.env.COOBMAIS_PASSWORD || '';
+let COOBMAIS_CANCEL_PASSWORD = process.env.COOBMAIS_CANCEL_PASSWORD || '';
 let coobmaisTokenExp = 0;
 let coobmaisAuthInflight = null;
 let coobmaisCredsGen = 0;
@@ -1889,6 +1894,7 @@ if (apiConfigOverrides.Coobmais?.baseUrl) COOBMAIS_BASE_URL = apiConfigOverrides
 if (apiConfigOverrides.Coobmais?.authUrl) COOBMAIS_AUTH_URL = apiConfigOverrides.Coobmais.authUrl;
 if (apiConfigOverrides.Coobmais?.accessKey) COOBMAIS_ACCESS_KEY = apiConfigOverrides.Coobmais.accessKey;
 if (apiConfigOverrides.Coobmais?.password) COOBMAIS_PASSWORD = apiConfigOverrides.Coobmais.password;
+if (apiConfigOverrides.Coobmais?.cancelPassword) COOBMAIS_CANCEL_PASSWORD = apiConfigOverrides.Coobmais.cancelPassword;
 if (apiConfigOverrides.Coobmais?.token) {
   COOBMAIS_TOKEN = apiConfigOverrides.Coobmais.token;
   try {
@@ -2263,9 +2269,9 @@ app.post('/api/lp/cities', async (req, res) => {
 const hotelCategoryCache = new Map();
 const HOTEL_CATEGORY_TTL = 30 * 60 * 1000;
 
-async function getHotelCategory(hotelId) {
+async function getHotelInfoCached(hotelId) {
   const cached = hotelCategoryCache.get(hotelId);
-  if (cached && Date.now() - cached.ts < HOTEL_CATEGORY_TTL) return cached.category;
+  if (cached && Date.now() - cached.ts < HOTEL_CATEGORY_TTL) return cached;
 
   try {
     const response = await fetch(`${COOBMAIS_BASE_URL}/Book/InfoHotels?hotel_id=${encodeURIComponent(hotelId)}`, {
@@ -2275,20 +2281,52 @@ async function getHotelCategory(hotelId) {
     if (response.status !== 200) return null;
     const hotel = await response.json();
     const category = hotel.category || hotel.Category || hotel.category_id || null;
-    hotelCategoryCache.set(hotelId, { category, ts: Date.now() });
+    const photos = Array.isArray(hotel.photos) ? hotel.photos.filter(Boolean) : [];
+    const entry = { category, photos, ts: Date.now() };
+    hotelCategoryCache.set(hotelId, entry);
     if (hotelCategoryCache.size > 500) {
       const oldest = hotelCategoryCache.keys().next().value;
       hotelCategoryCache.delete(oldest);
     }
-    return category;
+    return entry;
   } catch {
     return null;
   }
 }
 
-// Fallback de busca direto na Coobmais (GetCities + GetHotels), usado quando o
-// webhook n8n falha (rede/timeout) ou não retorna hotéis. Mantém o mesmo formato
-// de `accommodations` esperado pelo restante do endpoint.
+async function getHotelCategory(hotelId) {
+  const info = await getHotelInfoCached(hotelId);
+  return info ? info.category : null;
+}
+
+// Resolve a imagem principal válida do hotel. O padrão da Coobmais é
+// `.../images/hotel/{id}/01.jpg`, mas alguns hotéis não têm `01.jpg` (HTTP 404)
+// e suas fotos reais começam em `02.jpg`. Quando a imagem padrão não estiver na
+// lista oficial de fotos (Book/InfoHotels), usamos a primeira foto válida.
+// Sem fotos disponíveis, mantém a imagem atual (placeholder tratado no client).
+function resolveMainImage(currentImage, photos) {
+  if (!Array.isArray(photos) || photos.length === 0) return currentImage || '';
+  if (currentImage && photos.includes(currentImage)) return currentImage;
+  return photos[0] || currentImage || '';
+}
+
+// Aplica resolveMainImage a uma lista de acomodações usando o cache de
+// InfoHotels (já aquecido pelo lookup de categoria), evitando chamadas extras.
+async function resolveAccommodationImages(accommodations) {
+  if (!Array.isArray(accommodations) || accommodations.length === 0) return;
+  const infos = await Promise.allSettled(accommodations.map(h => getHotelInfoCached(h.id)));
+  for (let i = 0; i < accommodations.length; i++) {
+    const info = infos[i].status === 'fulfilled' ? infos[i].value : null;
+    if (info && info.photos.length > 0) {
+      accommodations[i].image = resolveMainImage(accommodations[i].image, info.photos);
+    }
+  }
+}
+
+// Busca de hotéis direto na Coobmais (GetCities → GetHotels). Fonte única de
+// hospedagens da LP. Retorna `null` quando a cidade não tem `google_place_id`
+// (cidade não encontrada) e `[]` quando a Coobmais não retorna hotéis. Mantém o
+// mesmo formato de `accommodations` esperado pelo restante do endpoint.
 async function fetchHotelsFromCoobmais({ cidade, uf, google_place_id, checkIn, checkOut, adults, children }) {
   if (!checkIn || !checkOut) return [];
 
@@ -2306,7 +2344,7 @@ async function fetchHotelsFromCoobmais({ cidade, uf, google_place_id, checkIn, c
       if (Array.isArray(list) && list.length > 0) placeId = list[0].google_place_id;
     }
   }
-  if (!placeId) return [];
+  if (!placeId) return null;
 
   const r = await fetch(`${COOBMAIS_BASE_URL}/Book/GetHotels`, {
     method: 'POST',
@@ -2318,7 +2356,7 @@ async function fetchHotelsFromCoobmais({ cidade, uf, google_place_id, checkIn, c
       children: parseInt(children) || 0,
       children_age: 0,
       google_place_id: placeId,
-      qtde_linhas: 50,
+      qtde_linhas: 1000,
     }),
   });
   if (!r.ok) throw new Error(`Coobmais GetHotels HTTP ${r.status}`);
@@ -2329,87 +2367,59 @@ async function fetchHotelsFromCoobmais({ cidade, uf, google_place_id, checkIn, c
 
 app.post('/api/lp/hotels', async (req, res) => {
   try {
-    const { cidade, uf, checkIn, checkOut, adults, children, rooms, google_place_id, cidade_id } = req.body;
+    const { uf, checkIn, checkOut, adults, children, rooms, google_place_id, cidade_id, destination } = req.body;
+
+    const cidade = (typeof req.body.cidade === 'string' && req.body.cidade.trim())
+      ? req.body.cidade.trim()
+      : (typeof destination === 'string' ? destination.trim() : '');
+
+    if (!cidade) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Informe a cidade de destino para buscar hospedagens.',
+      });
+    }
 
     const childrenCount = typeof children === 'number' ? children : (Array.isArray(children) ? children.length : parseInt(children) || 0);
 
     const adultsCount = Math.max(2, parseInt(adults) || 2);
 
-    const payload = {
-      destination: cidade || '',
-      checkIn: checkIn || '',
-      checkOut: checkOut || '',
-      adults: adultsCount,
-    };
-
-    console.log(`[LP HOTELS] n8n webhook destination="${cidade}" payload:`, JSON.stringify(payload));
-
-    const N8N_TIMEOUT_MS = 20000;
-    const N8N_MAX_ATTEMPTS = 2;
-    let response = null;
-    let lastError = null;
-
-    for (let attempt = 1; attempt <= N8N_MAX_ATTEMPTS; attempt++) {
-      try {
-        response = await fetch(N8N_HOTELS_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(N8N_TIMEOUT_MS),
-        });
-        if (!response.ok) {
-          throw new Error(`n8n respondeu HTTP ${response.status}`);
-        }
-        break;
-      } catch (err) {
-        lastError = err;
-        const isTimeout = err.name === 'TimeoutError' || err.name === 'AbortError';
-        console.warn(`[LP HOTELS] Tentativa ${attempt}/${N8N_MAX_ATTEMPTS} falhou${isTimeout ? ' (timeout)' : ''}:`, err.message);
-        response = null;
-        if (attempt < N8N_MAX_ATTEMPTS) {
-          await new Promise(r => setTimeout(r, 500));
-        }
-      }
+    if (!checkIn || !checkOut) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Informe as datas de check-in e check-out para buscar hospedagens.',
+      });
     }
+
+    console.log(`[LP HOTELS] Coobmais destination="${cidade}" ${checkIn} → ${checkOut} adults=${adultsCount} children=${childrenCount}`);
 
     let accommodations = [];
-    if (response) {
-      const data = await response.json();
-      if (Array.isArray(data)) {
-        accommodations = data[0]?.accommodations || [];
-      } else if (data && typeof data === 'object') {
-        accommodations = data.accommodations || data.data || [];
-      }
-      if (!Array.isArray(accommodations)) accommodations = [];
-      console.log('[LP HOTELS] Found', accommodations.length, 'accommodations (n8n)');
-    }
-
-    // Fallback Coobmais: quando o n8n falha (rede/timeout) ou retorna vazio,
-    // busca direto na Coobmais para não deixar a busca sem resultados.
-    if (!response || accommodations.length === 0) {
-      try {
-        const coobHotels = await fetchHotelsFromCoobmais({
-          cidade, uf, google_place_id,
-          checkIn, checkOut, adults: adultsCount, children: childrenCount,
-        });
-        if (Array.isArray(coobHotels) && coobHotels.length > 0) {
-          accommodations = coobHotels;
-          console.log('[LP HOTELS] Fallback Coobmais retornou', accommodations.length, 'accommodations');
-        }
-      } catch (fbErr) {
-        console.warn('[LP HOTELS] Fallback Coobmais falhou:', fbErr.message);
-      }
-    }
-
-    if (!response && accommodations.length === 0) {
-      const isTimeout = lastError && (lastError.name === 'TimeoutError' || lastError.name === 'AbortError');
-      return res.status(504).json({
-        ok: false,
-        error: isTimeout
-          ? 'A busca de hospedagens está demorando mais que o esperado. Tente novamente em instantes.'
-          : 'Não foi possível buscar hospedagens no momento. Tente novamente em instantes.',
-        detail: lastError ? lastError.message : 'n8n indisponível',
+    try {
+      const coobHotels = await fetchHotelsFromCoobmais({
+        cidade, uf, google_place_id,
+        checkIn, checkOut, adults: adultsCount, children: childrenCount,
       });
+
+      if (coobHotels === null) {
+        return res.status(404).json({
+          ok: false,
+          error: `Não encontramos a cidade "${cidade}". Verifique a escrita e tente novamente.`,
+        });
+      }
+
+      accommodations = Array.isArray(coobHotels) ? coobHotels : [];
+      console.log('[LP HOTELS] Coobmais retornou', accommodations.length, 'accommodations');
+    } catch (coobErr) {
+      console.error('[LP HOTELS] Coobmais GetHotels falhou:', coobErr.message);
+      return res.status(502).json({
+        ok: false,
+        error: 'Não foi possível buscar hospedagens no momento. Tente novamente em instantes.',
+        detail: coobErr.message,
+      });
+    }
+
+    if (accommodations.length === 0) {
+      return res.json({ ok: true, data: [] });
     }
 
     let highSeasonMonths = [1, 2, 7, 12];
@@ -2432,6 +2442,15 @@ app.post('/api/lp/hotels', async (req, res) => {
       const parts = checkIn.split('-');
       const checkInMonth = parts.length >= 2 ? parseInt(parts[1], 10) : new Date(checkIn).getMonth() + 1;
       const isHighSeason = highSeasonMonths.includes(checkInMonth);
+
+      let nights = 0;
+      if (checkOut) {
+        const ci = new Date(checkIn);
+        const co = new Date(checkOut);
+        if (!isNaN(ci) && !isNaN(co)) {
+          nights = Math.max(0, Math.round((co - ci) / (1000 * 60 * 60 * 24)));
+        }
+      }
 
       const categoryPromises = accommodations.map(h => getHotelCategory(h.id));
       const categories = await Promise.allSettled(categoryPromises);
@@ -2458,13 +2477,22 @@ app.post('/api/lp/hotels', async (req, res) => {
 
         if (appliedRate && appliedRate > 0) {
           h.original_total_price = h.total_price;
-          h.cost = (h.cost || []).map(c => ({ ...c, original_daily: c.daily, daily: appliedRate }));
+          if (Array.isArray(h.cost) && h.cost.length > 0) {
+            h.cost = h.cost.map(c => ({ ...c, original_daily: c.daily, daily: appliedRate }));
+          } else if (nights > 0) {
+            h.cost = Array.from({ length: nights }, () => ({ daily: appliedRate, extras: 0 }));
+            h.daily_count = h.daily_count || nights;
+          } else {
+            h.cost = h.cost || [];
+          }
           h.total_price = h.cost.reduce((sum, c) => sum + (c.daily || 0) + (c.extras || 0), 0);
         }
       }
 
       console.log('[LP HOTELS] Applied category rates to', accommodations.filter(h => h.category_name).length, 'hotels');
     }
+
+    await resolveAccommodationImages(accommodations);
 
     if (checkIn && checkOut && accommodations.length > 0) {
       const adultsNum = Math.max(2, parseInt(adults) || 2);
@@ -2478,8 +2506,11 @@ app.post('/api/lp/hotels', async (req, res) => {
         )
       );
 
-      const filtered = probeResults.filter(r => r.hasImediata).map(r => r.hotel);
-      console.log(`[LP HOTELS] InfoApartment: ${filtered.length}/${accommodations.length} hotéis com apartamentos imediata`);
+      const filtered = probeResults
+        .filter(r => r.hasImediata || r.hotel?.by_request === true)
+        .map(r => r.hotel);
+      const byRequestKept = filtered.filter(h => h?.by_request === true && !probeResults.find(r => r.hotel === h)?.hasImediata).length;
+      console.log(`[LP HOTELS] InfoApartment: ${filtered.length}/${accommodations.length} hotéis retornados (${byRequestKept} sob consulta sem imediata)`);
       return res.json({ ok: true, data: filtered });
     }
 
@@ -2578,10 +2609,18 @@ async function getFirstHotelForCity(google_place_id, cityLabel) {
     console.warn('[FEATURED HOTELS] Erro ao aplicar category_rates:', e.message);
   }
 
+  let resolvedImage = h.image || '';
+  try {
+    const info = await getHotelInfoCached(h.id);
+    if (info && info.photos.length > 0) {
+      resolvedImage = resolveMainImage(resolvedImage, info.photos);
+    }
+  } catch {}
+
   return {
     id: h.id,
     name: h.name || '',
-    image: h.image || '',
+    image: resolvedImage,
     city: h.city?.name || cityLabel,
     state: h.state || '',
     cityState: h.city?.name ? `${h.city.name}${h.state ? ' - ' + h.state : ''}` : cityLabel,
@@ -3793,6 +3832,7 @@ app.post('/api/lp/bookings', async (req, res) => {
         checkout: check_out || '',
         localizador: localizador || '',
         valor: total_price ? String(total_price) : '',
+        hotel_id: hotel_id || '',
       };
       if (u?.phone) {
         triggerWhatsAppFlow('booking_confirmed', bookingVars, u.phone).catch(() => {});
@@ -3867,6 +3907,11 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
       return res.json({ ok: false, error: 'O cadastro institucional não está vinculado ao sistema de reservas. Entre em contato com o suporte.' });
     }
 
+    if (!COOBMAIS_CANCEL_PASSWORD) {
+      console.log('[LP BOOKINGS] Cancel password not configured');
+      return res.json({ ok: false, error: 'A senha de cancelamento do associado não está configurada. Configure-a na Central de APIs (Coobmais) para permitir cancelamentos.' });
+    }
+
     let bookingCancelOk = false;
     let bookingCancelMsg = '';
     try {
@@ -3879,7 +3924,8 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
         body: JSON.stringify({
           token: cancelToken,
           cpf: BOOKING_CNPJ,
-          vfb_identifier: vfbId
+          vfb_identifier: vfbId,
+          senha: COOBMAIS_CANCEL_PASSWORD
         })
       });
       const cancelText = await cancelRes.text();
@@ -3954,6 +4000,7 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
         checkout: b.check_out || '',
         localizador: b.localizador || '',
         valor: b.total_price ? String(b.total_price) : '',
+        hotel_id: b.hotel_id || '',
       };
       if (u?.phone) {
         triggerWhatsAppFlow('booking_cancelled', cancelVars, u.phone).catch(() => {});
@@ -4495,6 +4542,146 @@ app.post('/api/payments/:id/refresh', async (req, res) => {
   }
 });
 
+app.patch('/api/payments/:id/cancel-booking', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const payRow = await query('SELECT * FROM payments WHERE id = $1', [id]);
+    if (payRow.rows.length === 0) return res.status(404).json({ ok: false, error: 'Pagamento não encontrado' });
+    const payment = payRow.rows[0];
+
+    let booking = null;
+    if (payment.booking_locator) {
+      const bRes = await query('SELECT * FROM bookings WHERE localizador = $1 ORDER BY id DESC LIMIT 1', [payment.booking_locator]);
+      if (bRes.rows.length > 0) booking = bRes.rows[0];
+    }
+    if (!booking) {
+      return res.json({ ok: false, error: 'Reserva vinculada não encontrada para este pagamento.' });
+    }
+
+    const b = booking;
+    const paymentCancelled = payment.status === 'canceled' || payment.status === 'cancelled';
+    if (b.status === 'cancelled' && paymentCancelled) {
+      return res.json({ ok: true, message: 'Reserva e pagamento já cancelados' });
+    }
+
+    let bookingCancelOk = b.status === 'cancelled';
+    let bookingCancelMsg = '';
+
+    if (!bookingCancelOk) {
+      const cancelToken = b.booking_code || b.localizador;
+      const vfbId = await getAssociateNic(BOOKING_CNPJ);
+      console.log('[PAYMENTS CANCEL] Cancel using token (booking_code):', cancelToken, 'localizador:', b.localizador, 'cnpj:', BOOKING_CNPJ.substring(0, 4) + '***', 'vfb:', vfbId || 'NULL');
+
+      if (!vfbId) {
+        console.log('[PAYMENTS CANCEL] Associate not found for CNPJ, cannot cancel');
+        return res.json({ ok: false, error: 'O cadastro institucional não está vinculado ao sistema de reservas. Entre em contato com o suporte.' });
+      }
+
+      if (!COOBMAIS_CANCEL_PASSWORD) {
+        console.log('[PAYMENTS CANCEL] Cancel password not configured');
+        return res.json({ ok: false, error: 'A senha de cancelamento do associado não está configurada. Configure-a na Central de APIs (Coobmais) para permitir cancelamentos.' });
+      }
+
+      try {
+        const cancelRes = await fetch(`${COOBMAIS_BASE_URL}/Book/CancellationBook`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${await ensureCoobToken()}`
+          },
+          body: JSON.stringify({
+            token: cancelToken,
+            cpf: BOOKING_CNPJ,
+            vfb_identifier: vfbId,
+            senha: COOBMAIS_CANCEL_PASSWORD
+          })
+        });
+        const cancelText = await cancelRes.text();
+        console.log('[PAYMENTS CANCEL] Cancel API raw response:', cancelText, 'status:', cancelRes.status);
+        let cancelData;
+        try { cancelData = JSON.parse(cancelText); } catch { cancelData = cancelText; }
+        const cd = Array.isArray(cancelData) ? cancelData[0] : cancelData;
+        bookingCancelOk = cancelRes.ok && (
+          cd?.situacao === 1 || cd?.situacao === '1' ||
+          cd?.sucesso === 1 || cd?.sucesso === '1' ||
+          cd?.resultado === 1 || cd?.resultado === '1' ||
+          cd?.Situacao === 1 || cd?.Situacao === '1' ||
+          cd?.success === true || cd?.Success === true ||
+          (typeof cd === 'string' && cd.toLowerCase().includes('sucesso'))
+        );
+        if (!bookingCancelOk && cancelRes.ok && cd && !cd.situacao && !cd.resultado && !cd.sucesso) {
+          bookingCancelOk = true;
+        }
+        bookingCancelMsg = cd?.Texto || cd?.texto || cd?.mensagem || cd?.Mensagem || cd?.message || '';
+        console.log('[PAYMENTS CANCEL] Cancel parsed:', JSON.stringify(cd), 'bookingCancelOk:', bookingCancelOk);
+      } catch (err) {
+        console.error('[PAYMENTS CANCEL] Cancel API error:', err.message);
+        bookingCancelMsg = 'Erro de conexao com a operadora';
+      }
+
+      if (!bookingCancelOk) {
+        console.log('[PAYMENTS CANCEL] Booking cancel FAILED, aborting. Msg:', bookingCancelMsg);
+        return res.json({ ok: false, error: bookingCancelMsg || 'Nao foi possivel cancelar a hospedagem na operadora.' });
+      }
+    }
+
+    let paymentCancelOk = true;
+    let paymentCancelMsg = '';
+    if (payment.vindi_bill_id && !paymentCancelled) {
+      const billId = payment.vindi_bill_id;
+      console.log('[PAYMENTS CANCEL] Cancelling Vindi bill:', billId, 'current status:', payment.status);
+      try {
+        const vindiRes = await vindiRequest('DELETE', `/bills/${billId}`);
+        console.log('[PAYMENTS CANCEL] Vindi cancel response:', vindiRes.status, JSON.stringify(vindiRes.data));
+        if (vindiRes.status >= 200 && vindiRes.status < 300) {
+          console.log('[PAYMENTS CANCEL] Vindi bill cancelled:', billId);
+        } else {
+          paymentCancelOk = false;
+          paymentCancelMsg = vindiRes.data?.errors?.[0]?.message || vindiRes.data?.message || `Erro Vindi HTTP ${vindiRes.status}`;
+        }
+      } catch (err) {
+        console.error('[PAYMENTS CANCEL] Vindi cancel error:', err.message);
+        paymentCancelOk = false;
+        paymentCancelMsg = 'Erro ao cancelar pagamento na Vindi';
+      }
+    }
+
+    if (!paymentCancelOk) {
+      console.log('[PAYMENTS CANCEL] Payment cancel FAILED, aborting. Msg:', paymentCancelMsg);
+      return res.json({ ok: false, error: `Hospedagem cancelada, mas o pagamento nao pode ser cancelado: ${paymentCancelMsg}` });
+    }
+
+    await query('UPDATE payments SET status = $1, updated_at = NOW() WHERE id = $2', ['canceled', id]);
+    await query('UPDATE bookings SET status = $1, updated_at = NOW() WHERE id = $2', ['cancelled', b.id]);
+    console.log('[PAYMENTS CANCEL] Cancelled booking:', b.id, 'localizador:', b.localizador, 'payment:', id);
+
+    try {
+      const userRow = await query('SELECT name, phone, email FROM users WHERE id = $1', [b.user_id]);
+      const u = userRow.rows[0];
+      const cancelVars = {
+        nome: u?.name || payment.guest_name || '',
+        hotel: b.hotel_name || payment.hotel_name || '',
+        checkin: b.check_in || '',
+        checkout: b.check_out || '',
+        localizador: b.localizador || '',
+        valor: b.total_price ? String(b.total_price) : '',
+        hotel_id: b.hotel_id || '',
+      };
+      if (u?.phone) {
+        triggerWhatsAppFlow('booking_cancelled', cancelVars, u.phone).catch(() => {});
+      }
+      if (u?.email) {
+        triggerEmailFlow('booking_cancelled', cancelVars, u.email).catch(() => {});
+      }
+    } catch (e) {}
+
+    res.json({ ok: true, message: bookingCancelMsg || 'Reserva e pagamento cancelados com sucesso' });
+  } catch (error) {
+    console.error('[PAYMENTS CANCEL] Error:', error.message);
+    res.status(500).json({ ok: false, error: 'Erro ao cancelar reserva' });
+  }
+});
+
 app.get('/api/vindi/bill/:id', async (req, res) => {
   try {
     const lpToken = parseLpToken(req);
@@ -5009,6 +5196,88 @@ async function sendEmailMessage(recipient, subject, body, flowId = null, flowNam
   }
 }
 
+const hotelEmailCache = new Map(); // key -> { email, exp }
+
+function extractHotelEmailFromDetails(d) {
+  if (!d || typeof d !== 'object') return null;
+  const candidates = [
+    d.hotel_email, d.hotelEmail, d.HotelEmail, d.email_hotel, d.emailHotel,
+    d.hotel?.email, d.hotel?.Email, d.Hotel?.email, d.Hotel?.Email,
+    d.hotel?.hotel_email, d.Hotel?.hotel_email,
+  ];
+  for (const c of candidates) {
+    const v = (c || '').toString().trim();
+    if (v && isValidEmailAddr(v)) return v;
+  }
+  return null;
+}
+
+// Resolve o e-mail do hotel a partir do localizador da reserva (Coobmais GetBookDetails),
+// com fallback para InfoHotels via hotel_id. Cache curto para evitar chamadas repetidas.
+async function resolveHotelEmail(localizador, hotelId) {
+  const key = localizador ? `loc:${localizador}` : (hotelId ? `hid:${hotelId}` : null);
+  if (!key) return null;
+  const cached = hotelEmailCache.get(key);
+  if (cached && cached.exp > Date.now()) return cached.email;
+
+  let email = null;
+  let resolvedHotelId = hotelId || null;
+
+  if (localizador) {
+    try {
+      const resp = await fetch(`${COOBMAIS_BASE_URL}/Book/GetBookDetails?localizador=${encodeURIComponent(localizador)}`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${await ensureCoobToken()}` },
+      });
+      const txt = await resp.text();
+      if (txt && resp.status === 200) {
+        let details = null;
+        try { details = JSON.parse(txt); } catch (_) {}
+        email = extractHotelEmailFromDetails(details);
+        if (!email && details) {
+          resolvedHotelId = details.hotel_id || details.hotelId || details.hotel?.id || details.Hotel?.id || resolvedHotelId;
+        }
+      } else {
+        console.warn('[EMAIL] GetBookDetails status', resp.status, 'localizador:', localizador);
+      }
+    } catch (e) {
+      console.error('[EMAIL] GetBookDetails error:', e.message);
+    }
+  }
+
+  if (!email && resolvedHotelId) {
+    try {
+      const resp = await fetch(`${COOBMAIS_BASE_URL}/Book/InfoHotels?hotel_id=${encodeURIComponent(resolvedHotelId)}`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${await ensureCoobToken()}` },
+      });
+      const txt = await resp.text();
+      if (txt && resp.status === 200) {
+        let hotel = null;
+        try { hotel = JSON.parse(txt); } catch (_) {}
+        const v = (hotel?.email || '').toString().trim();
+        if (v && isValidEmailAddr(v)) email = v;
+      }
+    } catch (e) {
+      console.error('[EMAIL] InfoHotels (hotel email) error:', e.message);
+    }
+  }
+
+  hotelEmailCache.set(key, { email, exp: Date.now() + (email ? 10 : 2) * 60 * 1000 });
+  return email;
+}
+
+async function logEmailHotelFailure(flowId, flowName, subject, body, localizador, eventName) {
+  try {
+    await query(
+      `INSERT INTO email_logs (flow_id, flow_name, recipient_email, subject, message, status, error_message, metadata) VALUES ($1, $2, $3, $4, $5, 'error', $6, $7)`,
+      [flowId, flowName || 'manual', '(hotel não encontrado)', subject || '', body, `E-mail do hotel não encontrado (localizador: ${localizador || '-'})`, JSON.stringify({ event: eventName, recipient_type: 'hotel' })]
+    );
+  } catch (e) {
+    console.error('[EMAIL] Failed to log hotel failure:', e.message);
+  }
+}
+
 async function triggerEmailFlow(eventName, vars, recipient) {
   try {
     const flows = await query('SELECT * FROM email_flows WHERE trigger_event = $1 AND enabled = true', [eventName]);
@@ -5016,13 +5285,44 @@ async function triggerEmailFlow(eventName, vars, recipient) {
       const subject = renderTemplate(flow.subject || '', vars);
       const body = renderTemplate(flow.message_template, vars);
       const isHtml = flow.is_html !== false;
+
+      // Determina os destinatários a partir dos nós de e-mail (padrão: cliente).
+      const flowNodes = Array.isArray(flow.metadata?.flow_nodes) ? flow.metadata.flow_nodes : [];
+      const messageNodes = flowNodes.filter(n => n.type === 'message');
+      let wantClient = false;
+      let wantHotel = false;
+      if (messageNodes.length === 0) {
+        wantClient = true; // fluxos legados sem flow_nodes
+      } else {
+        for (const n of messageNodes) {
+          const rt = n.data?.recipient_type || 'client';
+          if (rt === 'client' || rt === 'both') wantClient = true;
+          if (rt === 'hotel' || rt === 'both') wantHotel = true;
+        }
+      }
+
+      const dispatch = async () => {
+        if (wantClient && recipient) {
+          await sendEmailMessage(recipient, subject, body, flow.id, flow.name, { event: eventName, recipient_type: 'cliente', vars }, isHtml);
+        }
+        if (wantHotel) {
+          const hotelEmail = await resolveHotelEmail(vars?.localizador, vars?.hotel_id);
+          if (hotelEmail) {
+            await sendEmailMessage(hotelEmail, subject, body, flow.id, flow.name, { event: eventName, recipient_type: 'hotel', vars }, isHtml);
+          } else {
+            console.warn(`[EMAIL] Hotel email não encontrado (flow "${flow.name}", localizador: ${vars?.localizador || '-'})`);
+            await logEmailHotelFailure(flow.id, flow.name, subject, body, vars?.localizador, eventName);
+          }
+        }
+      };
+
       if (flow.delay_minutes > 0) {
         setTimeout(() => {
-          sendEmailMessage(recipient, subject, body, flow.id, flow.name, { event: eventName, vars }, isHtml);
+          dispatch().catch(e => console.error('[EMAIL] Delayed dispatch error:', e.message));
         }, flow.delay_minutes * 60 * 1000);
         console.log(`[EMAIL] Flow "${flow.name}" scheduled for ${flow.delay_minutes}min`);
       } else {
-        await sendEmailMessage(recipient, subject, body, flow.id, flow.name, { event: eventName, vars }, isHtml);
+        await dispatch();
       }
     }
   } catch (err) {
@@ -5455,6 +5755,7 @@ function applyApiConfigOverrides() {
   if (o.Coobmais?.authUrl) COOBMAIS_AUTH_URL = o.Coobmais.authUrl;
   if (o.Coobmais?.accessKey) COOBMAIS_ACCESS_KEY = o.Coobmais.accessKey;
   if (o.Coobmais?.password) COOBMAIS_PASSWORD = o.Coobmais.password;
+  if (o.Coobmais?.cancelPassword) COOBMAIS_CANCEL_PASSWORD = o.Coobmais.cancelPassword;
   if (o.Coobmais?.token) {
     COOBMAIS_TOKEN = o.Coobmais.token;
     try {

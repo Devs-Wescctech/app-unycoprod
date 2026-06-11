@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, LogIn, UserPlus, Eye, EyeOff, Loader2, CircleAlert, CheckCircle2 } from 'lucide-react';
 import PhoneInput from './PhoneInput';
 
@@ -93,8 +94,12 @@ export default function AuthModal({ initialTab = 'login', onClose, onSuccess }) 
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" onClick={onClose}>
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      style={{ pointerEvents: 'auto' }}
+      onClick={onClose}
+    >
       <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
       <div
         className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden"
@@ -270,6 +275,7 @@ export default function AuthModal({ initialTab = 'login', onClose, onSuccess }) 
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
