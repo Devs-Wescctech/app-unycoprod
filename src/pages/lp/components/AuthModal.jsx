@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X, LogIn, UserPlus, Eye, EyeOff, Loader2, CircleAlert, CheckCircle2 } from 'lucide-react';
 import PhoneInput from './PhoneInput';
 
@@ -94,18 +94,19 @@ export default function AuthModal({ initialTab = 'login', onClose, onSuccess }) 
     }
   };
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
-      style={{ pointerEvents: 'auto' }}
-      onClick={onClose}
-    >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
-      <div
-        className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden"
-        style={{ animation: 'modalIn 0.3s cubic-bezier(0.16,1,0.3,1)' }}
-        onClick={e => e.stopPropagation()}
-      >
+  return (
+    <DialogPrimitive.Root open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-md" />
+        <DialogPrimitive.Content
+          aria-describedby={undefined}
+          className="fixed left-1/2 top-1/2 z-[80] w-full max-w-sm -translate-x-1/2 -translate-y-1/2 p-4 focus:outline-none"
+        >
+          <DialogPrimitive.Title className="sr-only">{tab === 'login' ? 'Entrar na sua conta' : 'Criar conta'}</DialogPrimitive.Title>
+          <div
+            className="relative w-full bg-white rounded-3xl shadow-2xl overflow-hidden"
+            style={{ animation: 'modalIn 0.3s cubic-bezier(0.16,1,0.3,1)' }}
+          >
         <button
           onClick={onClose}
           className="absolute top-4 right-4 w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors z-10"
@@ -274,8 +275,9 @@ export default function AuthModal({ initialTab = 'login', onClose, onSuccess }) 
             </form>
           )}
         </div>
-      </div>
-    </div>,
-    document.body
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
