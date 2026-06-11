@@ -438,7 +438,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(v) => { if (!v && !alternativesModalOpen && !authOpen) handleClose(); }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !alternativesModalOpen && !authOpen) handleClose(); }} modal={!authOpen}>
       <DialogContent
         className="max-w-2xl max-h-[92vh] overflow-y-auto p-0 gap-0 rounded-2xl border-0 shadow-2xl bg-white mx-2 sm:mx-auto"
         onInteractOutside={(e) => { if (alternativesModalOpen || authOpen) e.preventDefault(); }}

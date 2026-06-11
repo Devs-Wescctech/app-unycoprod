@@ -140,7 +140,7 @@ export default function HotelDetailModal({ hotel, open, onClose, searchParams, o
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange} modal={!authOpen}>
       <DialogContent
         className="max-w-4xl max-h-[90vh] overflow-y-auto p-0 rounded-2xl border-0 shadow-2xl mx-2 sm:mx-auto"
         onInteractOutside={(e) => { if (authOpen) e.preventDefault(); }}
