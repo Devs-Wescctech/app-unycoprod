@@ -343,6 +343,7 @@ function CategoryRatesSection() {
 function CacheSection() {
   const [refreshing, setRefreshing] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [clearingComparativo, setClearingComparativo] = useState(false);
 
   const handleRefreshMarket = async () => {
     setRefreshing(true);
@@ -376,6 +377,30 @@ function CacheSection() {
       toast.error('Erro de conexão ao limpar caches');
     } finally {
       setClearing(false);
+    }
+  };
+
+  const handleClearComparativo = async () => {
+    const ok = window.confirm(
+      'Limpar cache do Comparativo de Preços?\n\n' +
+      'Isso apaga apenas os preços por OTA (Booking, Expedia, etc.) do comparativo. ' +
+      'Na próxima visita à LP, o sistema buscará novamente esses preços via SerpAPI (1 consulta por hotel Unyco).\n\n' +
+      'Os preços do card verde e do carrossel NÃO serão afetados.'
+    );
+    if (!ok) return;
+    setClearingComparativo(true);
+    try {
+      const res = await fetch('/api/admin/caches/clear-comparativo', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(`Cache do comparativo limpo. Os preços por OTA serão recarregados na próxima visita.`);
+      } else {
+        toast.error(data.error || 'Erro ao limpar cache do comparativo');
+      }
+    } catch {
+      toast.error('Erro de conexão ao limpar cache do comparativo');
+    } finally {
+      setClearingComparativo(false);
     }
   };
 
@@ -429,6 +454,26 @@ function CacheSection() {
           >
             {clearing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
             {clearing ? 'Limpando...' : 'Limpar caches'}
+          </button>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+              <TrendingUp className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-800 text-sm">Limpar cache do Comparativo de Preços</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Apaga apenas os preços por OTA (Booking, Expedia, etc.). Card verde e carrossel não são afetados. Preços recarregados na próxima visita.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleClearComparativo}
+            disabled={clearingComparativo || refreshing || clearing}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:bg-amber-300 text-white font-semibold rounded-lg text-sm transition-colors shrink-0"
+          >
+            {clearingComparativo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            {clearingComparativo ? 'Limpando...' : 'Limpar comparativo'}
           </button>
         </div>
       </div>

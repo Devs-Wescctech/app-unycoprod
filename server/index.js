@@ -2925,10 +2925,28 @@ app.get('/api/lp/market-prices', async (req, res) => {
       // A busca por cidade não traz OTAs; só a consulta por hotel devolve Booking/Expedia/trivago/etc.
       let realSources = new Map();
       if (unycoPrice && chosenSerp && Array.isArray(chosenSerp.properties) && chosenSerp.properties.length) {
+        // Tenta encontrar a propriedade cujo nome corresponde ao hotel Unyco.
+        // Normaliza: sem acento, minúsculo, só alfanumérico+espaço.
+        const normStr = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+        const hotelWords = normStr(hotel.name).split(' ').filter(w => w.length > 2);
+        const scoreMatch = (prop) => {
+          const pn = normStr(prop.name || '');
+          if (!pn || !hotelWords.length) return 0;
+          const matches = hotelWords.filter(w => pn.includes(w)).length;
+          return matches / hotelWords.length;
+        };
         const target = marketPrice || chosenSerp.median || chosenSerp.max || unycoPrice;
-        const rep = chosenSerp.properties
-          .slice()
-          .sort((a, b) => Math.abs(a.price - target) - Math.abs(b.price - target))[0];
+        const best = chosenSerp.properties.reduce((acc, p) => {
+          const s = scoreMatch(p);
+          return s > acc.score ? { prop: p, score: s } : acc;
+        }, { prop: null, score: 0 });
+        const rep = (best.score >= 0.4 ? best.prop : null) ||
+          chosenSerp.properties.slice().sort((a, b) => Math.abs(a.price - target) - Math.abs(b.price - target))[0];
+        if (best.score >= 0.4) {
+          console.log(`[MARKET PRICES] Match de hotel: "${best.prop.name}" (score ${(best.score * 100).toFixed(0)}%) para "${hotel.name}"`);
+        } else {
+          console.log(`[MARKET PRICES] Sem match de nome para "${hotel.name}" — usando fallback por preço`);
+        }
         if (rep && rep.token) {
           const pKey = `prop:${rep.token}|${usedDates.checkIn}`;
           const pc = serpMarketCache.get(pKey);
@@ -3154,6 +3172,32 @@ app.post('/api/admin/caches/clear', async (req, res) => {
   } catch (e) {
     console.error('[CACHE CLEAR] Error:', e.message);
     res.status(500).json({ ok: false, error: 'Erro ao limpar caches', detail: e.message });
+  }
+});
+
+app.post('/api/admin/caches/clear-comparativo', async (req, res) => {
+  try {
+    const propCount = [...serpMarketCache.keys()].filter(k => k.startsWith('prop:')).length;
+    for (const k of [...serpMarketCache.keys()]) {
+      if (k.startsWith('prop:')) serpMarketCache.delete(k);
+    }
+    const byDateCount = marketPricesByDate.size;
+    marketPricesByDate.clear();
+
+    let blobDeleted = 0;
+    try {
+      const r = await query("DELETE FROM system_config WHERE key = 'market_prices_cache'");
+      blobDeleted = r.rowCount || 0;
+    } catch (e) {
+      console.warn('[CACHE CLEAR COMPARATIVO] Erro ao remover blob:', e.message);
+    }
+
+    const total = propCount + byDateCount + blobDeleted;
+    console.log(`[CACHE CLEAR COMPARATIVO] prop:* removidos=${propCount}, marketPricesByDate=${byDateCount}, blobDB=${blobDeleted}`);
+    res.json({ ok: true, total, cleared: { propEntries: propCount, marketByDate: byDateCount, marketPricesBlob: blobDeleted } });
+  } catch (e) {
+    console.error('[CACHE CLEAR COMPARATIVO] Error:', e.message);
+    res.status(500).json({ ok: false, error: 'Erro ao limpar cache do comparativo', detail: e.message });
   }
 });
 
@@ -5201,6 +5245,7 @@ const hotelEmailCache = new Map(); // key -> { email, exp }
 function extractHotelEmailFromDetails(d) {
   if (!d || typeof d !== 'object') return null;
   const candidates = [
+    d.ResEmail, d.resEmail,
     d.hotel_email, d.hotelEmail, d.HotelEmail, d.email_hotel, d.emailHotel,
     d.hotel?.email, d.hotel?.Email, d.Hotel?.email, d.Hotel?.Email,
     d.hotel?.hotel_email, d.Hotel?.hotel_email,
