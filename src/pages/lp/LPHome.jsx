@@ -720,7 +720,7 @@ export default function LPHome() {
                       alt={hotel.name}
                       className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                       draggable={false}
-                      loading="lazy"
+                      loading="eager"
                     />
                   ) : (
                     <div className="absolute inset-0 bg-gradient-to-br from-blue-700 to-blue-400" />

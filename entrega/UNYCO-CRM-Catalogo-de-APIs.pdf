@@ -1,5 +1,5 @@
 %PDF-1.3
-%ºß¬à
+%ï¿½ß¬ï¿½
 3 0 obj
 <</Type /Page
 /Parent 1 0 R
@@ -36,21 +36,21 @@ BT
 12.6499999999999986 TL
 1. g
 45.354330708661422 552.7561417322833677 Td
-(CRM · Plataforma de Gestão e Reservas) Tj
+(CRM ï¿½ Plataforma de Gestï¿½o e Reservas) Tj
 ET
 BT
 /F2 28 Tf
 32.1999999999999957 TL
 1. g
 45.354330708661422 416.69314960629913 Td
-(Catálogo de APIs) Tj
+(Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 11 Tf
 12.6499999999999986 TL
 1. g
 45.354330708661422 382.6774015748030706 Td
-(Integrações externas e endpoints internos) Tj
+(Integraï¿½ï¿½es externas e endpoints internos) Tj
 ET
 BT
 /F2 10 Tf
@@ -78,7 +78,7 @@ BT
 11.5 TL
 1. g
 215.4330708661417475 102.0474803149605805 Td
-(Produção \(unycoclub.com.br\)) Tj
+(Produï¿½ï¿½o \(unycoclub.com.br\)) Tj
 ET
 BT
 /F2 10 Tf
@@ -106,7 +106,7 @@ BT
 11.5 TL
 1. g
 45.354330708661422 45.354566929133739 Td
-(WESCCTECH · unycoclub.com.br) Tj
+(WESCCTECH ï¿½ unycoclub.com.br) Tj
 ET
 endstream
 endobj
@@ -140,7 +140,7 @@ BT
 10.3499999999999996 TL
 1. g
 516.7112598425196666 816.3781889763779418 Td
-(Sumário) Tj
+(Sumï¿½rio) Tj
 ET
 0.3 0.64 1. rg
 45.354330708661422 768.1892125984251152 11.3385826771653555 -25.5118110236220517 re
@@ -150,7 +150,7 @@ BT
 23. TL
 0.18 0.384 0.6 rg
 68.031496062992133 748.346692913385823 Td
-(Sumário) Tj
+(Sumï¿½rio) Tj
 ET
 BT
 /F2 11 Tf
@@ -164,7 +164,7 @@ BT
 12.6499999999999986 TL
 0.122 0.161 0.216 rg
 79.3700787401574814 717.1655905511811397 Td
-(Visão Geral) Tj
+(Visï¿½o Geral) Tj
 ET
 0.9 0.91 0.92 RG
 [1.7007874015748032 3.4015748031496065] 0. d
@@ -245,7 +245,7 @@ BT
 12.6499999999999986 TL
 0.122 0.161 0.216 rg
 79.3700787401574814 640.6301574803148924 Td
-(Eventos e Gatilhos Automáticos) Tj
+(Eventos e Gatilhos Automï¿½ticos) Tj
 ET
 0.9 0.91 0.92 RG
 [1.7007874015748032 3.4015748031496065] 0. d
@@ -265,7 +265,7 @@ BT
 10.3499999999999996 TL
 0.42 0.447 0.502 rg
 45.354330708661422 56.69314960629913 Td
-(Documento confidencial · uso exclusivo da UNYCO e WESCCTECH) Tj
+(Documento confidencial ï¿½ uso exclusivo da UNYCO e WESCCTECH) Tj
 ET
 0.9 0.91 0.92 RG
 0.5669291338582678 w
@@ -277,7 +277,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -320,7 +320,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -351,7 +351,7 @@ BT
 10.3499999999999996 TL
 1. g
 493.2212598425197143 816.3781889763779418 Td
-(1. Visão Geral) Tj
+(1. Visï¿½o Geral) Tj
 ET
 0.3 0.64 1. rg
 45.354330708661422 773.8585039370078675 11.3385826771653555 -25.5118110236220517 re
@@ -361,14 +361,14 @@ BT
 23. TL
 0.18 0.384 0.6 rg
 68.031496062992133 754.0159842519684616 Td
-(1. Visão Geral) Tj
+(1. Visï¿½o Geral) Tj
 ET
 BT
 /F1 10 Tf
 11.5 TL
 0.122 0.161 0.216 rg
 45.354330708661422 722.8348818897637784 Td
-(Este documento cataloga todas as APIs envolvidas no funcionamento do UNYCO CRM. É dividido em duas) Tj
+(Este documento cataloga todas as APIs envolvidas no funcionamento do UNYCO CRM. ï¿½ dividido em duas) Tj
 ET
 BT
 /F1 10 Tf
@@ -382,14 +382,14 @@ BT
 11.5 TL
 0.122 0.161 0.216 rg
 45.354330708661422 688.819133858267719 Td
-(próprio backend para o frontend e para integração de terceiros.) Tj
+(prï¿½prio backend para o frontend e para integraï¿½ï¿½o de terceiros.) Tj
 ET
 BT
 /F2 13 Tf
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 666.1419685039369369 Td
-(Arquitetura de integração) Tj
+(Arquitetura de integraï¿½ï¿½o) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -422,7 +422,7 @@ BT
 11.5 TL
 0.122 0.161 0.216 rg
 62.3622047244094517 629.291574803149615 Td
-(Tokens e URLs das integrações são configuráveis em runtime na Central de APIs \(sem redeploy\).) Tj
+(Tokens e URLs das integraï¿½ï¿½es sï¿½o configurï¿½veis em runtime na Central de APIs \(sem redeploy\).) Tj
 ET
 0.3 0.64 1. rg
 52.4409448818897701 616.5356692913385359 m
@@ -436,7 +436,7 @@ BT
 11.5 TL
 0.122 0.161 0.216 rg
 62.3622047244094517 612.2837007874015853 Td
-(Persistência de configurações: server/api-config.json \(TOTVS, Coobmais, Vindi\) e tabela system_config) Tj
+(Persistï¿½ncia de configuraï¿½ï¿½es: server/api-config.json \(TOTVS, Coobmais, Vindi\) e tabela system_config) Tj
 ET
 BT
 /F1 10 Tf
@@ -457,14 +457,14 @@ BT
 11.5 TL
 0.122 0.161 0.216 rg
 62.3622047244094517 581.1025984251967884 Td
-(Cache em memória aplicado a respostas Coobmais \(cidades por 30min, categoria por 30min\) para reduzir) Tj
+(Cache em memï¿½ria aplicado a respostas Coobmais \(cidades por 30min, categoria por 30min\) para reduzir) Tj
 ET
 BT
 /F1 10 Tf
 11.5 TL
 0.122 0.161 0.216 rg
 62.3622047244094517 566.9293700787401349 Td
-(latência e custo.) Tj
+(latï¿½ncia e custo.) Tj
 ET
 BT
 /F2 13 Tf
@@ -498,42 +498,42 @@ BT
 11.5 TL
 0.18 0.384 0.6 rg
 56.6929133858267775 515.9057480314959321 Td
-(5 integrações externas) Tj
+(5 integraï¿½ï¿½es externas) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 501.7325196850393354 Td
-(· TOTVS Protheus — ERP, sincronização de cadastros) Tj
+(ï¿½ TOTVS Protheus ï¿½ ERP, sincronizaï¿½ï¿½o de cadastros) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 488.9766141732283131 Td
-(· Coobmais — busca de hotéis, gestão de reservas, dados de associados) Tj
+(ï¿½ Coobmais ï¿½ busca de hotï¿½is, gestï¿½o de reservas, dados de associados) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 476.2207086614172908 Td
-(· Vindi — processamento de pagamentos \(Cartão e PIX\)) Tj
+(ï¿½ Vindi ï¿½ processamento de pagamentos \(Cartï¿½o e PIX\)) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 463.4648031496062686 Td
-(· WhatsApp WESCCTECH — disparo de mensagens transacionais) Tj
+(ï¿½ WhatsApp WESCCTECH ï¿½ disparo de mensagens transacionais) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 450.7088976377952463 Td
-(· ViaCEP — autopreenchimento de endereço por CEP) Tj
+(ï¿½ ViaCEP ï¿½ autopreenchimento de endereï¿½o por CEP) Tj
 ET
 BT
 /F2 13 Tf
@@ -567,91 +567,91 @@ BT
 11.5 TL
 0.18 0.384 0.6 rg
 56.6929133858267775 392.5986614173227736 Td
-(Mais de 70 endpoints REST agrupados em 11 áreas) Tj
+(Mais de 70 endpoints REST agrupados em 11 ï¿½reas) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 378.4254330708660632 Td
-(· Health & Configuração pública) Tj
+(ï¿½ Health & Configuraï¿½ï¿½o pï¿½blica) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 365.6695275590550409 Td
-(· TOTVS \(proxy + sync\)) Tj
+(ï¿½ TOTVS \(proxy + sync\)) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 352.9136220472440186 Td
-(· Serviço de Sincronização) Tj
+(ï¿½ Serviï¿½o de Sincronizaï¿½ï¿½o) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 340.1577165354329964 Td
-(· Planos · Usuários · Assinaturas) Tj
+(ï¿½ Planos ï¿½ Usuï¿½rios ï¿½ Assinaturas) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 327.4018110236220309 Td
-(· LP — Auth e Sessão) Tj
+(ï¿½ LP ï¿½ Auth e Sessï¿½o) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 314.6459055118109518 Td
-(· LP — Hotéis e Reservas) Tj
+(ï¿½ LP ï¿½ Hotï¿½is e Reservas) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 301.8899999999999864 Td
-(· Vindi — Pagamentos) Tj
+(ï¿½ Vindi ï¿½ Pagamentos) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 289.1340944881889072 Td
-(· Pagamentos \(CRM\)) Tj
+(ï¿½ Pagamentos \(CRM\)) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 276.3781889763778281 Td
-(· Categorias e Tarifas) Tj
+(ï¿½ Categorias e Tarifas) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 263.6222834645668627 Td
-(· WhatsApp — Configuração, Fluxos, Logs) Tj
+(ï¿½ WhatsApp ï¿½ Configuraï¿½ï¿½o, Fluxos, Logs) Tj
 ET
 BT
 /F1 9 Tf
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 250.8663779527557836 Td
-(· Central de APIs) Tj
+(ï¿½ Central de APIs) Tj
 ET
 BT
 /F2 13 Tf
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 226.7718897637794271 Td
-(Convenções deste documento) Tj
+(Convenï¿½ï¿½es deste documento) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -691,7 +691,7 @@ BT
 11.5 TL
 0.122 0.161 0.216 rg
 62.3622047244094517 175.748267716535338 Td
-(Caminhos em fonte monoespaçada para fácil identificação.) Tj
+(Caminhos em fonte monoespaï¿½ada para fï¿½cil identificaï¿½ï¿½o.) Tj
 ET
 0.3 0.64 1. rg
 52.4409448818897701 162.9923622047243157 m
@@ -705,7 +705,7 @@ BT
 11.5 TL
 0.122 0.161 0.216 rg
 62.3622047244094517 158.7403937007873083 Td
-(Para APIs externas, cada bloco indica URL base, autenticação e principais endpoints utilizados pelo sistema.) Tj
+(Para APIs externas, cada bloco indica URL base, autenticaï¿½ï¿½o e principais endpoints utilizados pelo sistema.) Tj
 ET
 0.3 0.64 1. rg
 52.4409448818897701 145.984488188976286 m
@@ -719,7 +719,7 @@ BT
 11.5 TL
 0.122 0.161 0.216 rg
 62.3622047244094517 141.7325196850392786 Td
-(Todos os endpoints internos respondem em JSON. O envelope padrão usa { ok: true|false, data, error }.) Tj
+(Todos os endpoints internos respondem em JSON. O envelope padrï¿½o usa { ok: true|false, data, error }.) Tj
 ET
 endstream
 endobj
@@ -748,7 +748,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -816,7 +816,7 @@ BT
 9.1999999999999993 TL
 0.18 0.384 0.6 rg
 53.8582677165354369 646.2994488188976447 Td
-(AUTENTICAÇÃO) Tj
+(AUTENTICAï¿½ï¿½O) Tj
 ET
 BT
 /F5 8.5 Tf
@@ -837,14 +837,14 @@ BT
 9.7749999999999986 TL
 0.42 0.447 0.502 rg
 45.354330708661422 615.1183464566928478 Td
-(Usado para buscar e cadastrar clientes \(tabela SA1\). Identificador de parceiro fixo: A1_IDPARC = "WESCC1". Erros TOTVS são) Tj
+(Usado para buscar e cadastrar clientes \(tabela SA1\). Identificador de parceiro fixo: A1_IDPARC = "WESCC1". Erros TOTVS sï¿½o) Tj
 ET
 BT
 /F3 8.5 Tf
 9.7749999999999986 TL
 0.42 0.447 0.502 rg
 45.354330708661422 603.2128346456692043 Td
-(traduzidos para mensagens em português antes de retornar ao usuário.) Tj
+(traduzidos para mensagens em portuguï¿½s antes de retornar ao usuï¿½rio.) Tj
 ET
 BT
 /F2 13 Tf
@@ -957,7 +957,7 @@ BT
 11.5 TL
 0.18 0.384 0.6 rg
 56.6929133858267775 450.7088976377952463 Td
-(Body de exemplo — busca) Tj
+(Body de exemplo ï¿½ busca) Tj
 ET
 BT
 /F1 9 Tf
@@ -986,7 +986,7 @@ BT
 11.5 TL
 0.18 0.384 0.6 rg
 56.6929133858267775 398.2679527559054691 Td
-(Body de exemplo — sincronização) Tj
+(Body de exemplo ï¿½ sincronizaï¿½ï¿½o) Tj
 ET
 BT
 /F1 9 Tf
@@ -1031,7 +1031,7 @@ BT
 17.25 TL
 1. g
 56.6929133858267775 286.2994488188975311 Td
-(Coobmais \(associados, hotéis, reservas\)) Tj
+(Coobmais \(associados, hotï¿½is, reservas\)) Tj
 ET
 0.95 0.96 0.98 rg
 45.354330708661422 269.2915748031495013 504.5669291338583093 -62.3622047244094517 re
@@ -1048,7 +1048,7 @@ BT
 9.1999999999999993 TL
 0.18 0.384 0.6 rg
 53.8582677165354369 232.4411811023621794 Td
-(AUTENTICAÇÃO) Tj
+(AUTENTICAï¿½ï¿½O) Tj
 ET
 BT
 /F5 8.5 Tf
@@ -1062,7 +1062,7 @@ BT
 9.7749999999999986 TL
 0.122 0.161 0.216 rg
 136.0629921259842661 232.4411811023621794 Td
-(Bearer JWT \(gerado e cacheado pelo backend; refresh automático 5min antes do exp\)) Tj
+(Bearer JWT \(gerado e cacheado pelo backend; refresh automï¿½tico 5min antes do exp\)) Tj
 ET
 BT
 /F3 8.5 Tf
@@ -1083,7 +1083,7 @@ BT
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 171.7797637795275705 Td
-(Endpoint de autenticação) Tj
+(Endpoint de autenticaï¿½ï¿½o) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -1124,7 +1124,7 @@ BT
 9.7749999999999986 TL
 0.122 0.161 0.216 rg
 102.0472440944882067 126.7088976377953031 Td
-(Autenticação. Body: { AccessKey, password }. Retorna {) Tj
+(Autenticaï¿½ï¿½o. Body: { AccessKey, password }. Retorna {) Tj
 ET
 BT
 /F2 13 Tf
@@ -1165,7 +1165,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -1239,7 +1239,7 @@ BT
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 718.0159842519684616 Td
-(Endpoints de hotéis) Tj
+(Endpoints de hotï¿½is) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -1367,7 +1367,7 @@ BT
 9.7749999999999986 TL
 0.122 0.161 0.216 rg
 102.0472440944882067 592.1577165354329964 Td
-(Apartamentos disponíveis. Body: { hotel_id, start_date, end_date, adults, children, children_age) Tj
+(Apartamentos disponï¿½veis. Body: { hotel_id, start_date, end_date, adults, children, children_age) Tj
 ET
 0.95 0.96 0.98 rg
 45.354330708661422 578.5514173228345953 504.5669291338583093 -24.6614173228346445 re
@@ -1529,7 +1529,7 @@ BT
 9.1999999999999993 TL
 0.18 0.384 0.6 rg
 53.8582677165354369 356.882125984251843 Td
-(AUTENTICAÇÃO) Tj
+(AUTENTICAï¿½ï¿½O) Tj
 ET
 BT
 /F5 8.5 Tf
@@ -1550,14 +1550,14 @@ BT
 9.7749999999999986 TL
 0.42 0.447 0.502 rg
 45.354330708661422 325.7010236220471597 Td
-(Ambiente de produção. Suporta cartão de crédito e PIX. Para PIX, o backend extrai qrcode_path e qrcode_original_path de) Tj
+(Ambiente de produï¿½ï¿½o. Suporta cartï¿½o de crï¿½dito e PIX. Para PIX, o backend extrai qrcode_path e qrcode_original_path de) Tj
 ET
 BT
 /F3 8.5 Tf
 9.7749999999999986 TL
 0.42 0.447 0.502 rg
 45.354330708661422 313.7955118110235162 Td
-(charge.last_transaction.gateway_response_fields. Produto fixo via VINDI_PRODUCT_ID \(default 1980987 — "PROJETO UNYCO"\),) Tj
+(charge.last_transaction.gateway_response_fields. Produto fixo via VINDI_PRODUCT_ID \(default 1980987 ï¿½ "PROJETO UNYCO"\),) Tj
 ET
 BT
 /F3 8.5 Tf
@@ -1808,7 +1808,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -1982,7 +1982,7 @@ BT
 9.1999999999999993 TL
 0.18 0.384 0.6 rg
 53.8582677165354369 578.2679527559055259 Td
-(AUTENTICAÇÃO) Tj
+(AUTENTICAï¿½ï¿½O) Tj
 ET
 BT
 /F5 8.5 Tf
@@ -2003,7 +2003,7 @@ BT
 9.7749999999999986 TL
 0.42 0.447 0.502 rg
 45.354330708661422 547.086850393700729 Td
-(Disparo automático nos eventos booking_confirmed, booking_cancelled e registration_completed. Número formatado como) Tj
+(Disparo automï¿½tico nos eventos booking_confirmed, booking_cancelled e registration_completed. Nï¿½mero formatado como) Tj
 ET
 BT
 /F3 8.5 Tf
@@ -2085,7 +2085,7 @@ BT
 9.1999999999999993 TL
 0.18 0.384 0.6 rg
 53.8582677165354369 382.3939370078739444 Td
-(AUTENTICAÇÃO) Tj
+(AUTENTICAï¿½ï¿½O) Tj
 ET
 BT
 /F5 8.5 Tf
@@ -2099,14 +2099,14 @@ BT
 9.7749999999999986 TL
 0.122 0.161 0.216 rg
 136.0629921259842661 382.3939370078739444 Td
-(Não requer autenticação) Tj
+(Nï¿½o requer autenticaï¿½ï¿½o) Tj
 ET
 BT
 /F3 8.5 Tf
 9.7749999999999986 TL
 0.42 0.447 0.502 rg
 45.354330708661422 351.2128346456692611 Td
-(Usado para autopreenchimento de endereço a partir do CEP, no CRM e na LP.) Tj
+(Usado para autopreenchimento de endereï¿½o a partir do CEP, no CRM e na LP.) Tj
 ET
 BT
 /F2 13 Tf
@@ -2183,7 +2183,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -2231,28 +2231,28 @@ BT
 11.5 TL
 0.122 0.161 0.216 rg
 45.354330708661422 722.8348818897637784 Td
-(Todas as rotas a seguir são servidas em https://unycoclub.com.br pelo mesmo processo Node.js. Respostas em) Tj
+(Todas as rotas a seguir sï¿½o servidas em https://unycoclub.com.br pelo mesmo processo Node.js. Respostas em) Tj
 ET
 BT
 /F1 10 Tf
 11.5 TL
 0.122 0.161 0.216 rg
 45.354330708661422 705.8270078740157487 Td
-(JSON, envelope padrão { ok: true|false, data, error }. Algumas rotas exigem cookie lp_token \(sessão da Landing) Tj
+(JSON, envelope padrï¿½o { ok: true|false, data, error }. Algumas rotas exigem cookie lp_token \(sessï¿½o da Landing) Tj
 ET
 BT
 /F1 10 Tf
 11.5 TL
 0.122 0.161 0.216 rg
 45.354330708661422 688.819133858267719 Td
-(Page\) ou autenticação interna do CRM.) Tj
+(Page\) ou autenticaï¿½ï¿½o interna do CRM.) Tj
 ET
 BT
 /F2 13 Tf
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 666.1419685039369369 Td
-(3.1 Health e Configuração pública) Tj
+(3.1 Health e Configuraï¿½ï¿½o pï¿½blica) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -2293,7 +2293,7 @@ BT
 9.7749999999999986 TL
 0.122 0.161 0.216 rg
 102.0472440944882067 621.0711023622046696 Td
-(Health check do servidor e da conexão com o) Tj
+(Health check do servidor e da conexï¿½o com o) Tj
 ET
 0.95 0.96 0.98 rg
 45.354330708661422 607.4648031496062686 504.5669291338583093 -24.6614173228346445 re
@@ -2515,7 +2515,7 @@ BT
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 399.1183464566929047 Td
-(3.3 Serviço de Sincronização) Tj
+(3.3 Serviï¿½o de Sincronizaï¿½ï¿½o) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -2730,7 +2730,7 @@ BT
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 190.7718897637794271 Td
-(3.4 Planos, Usuários e Assinaturas) Tj
+(3.4 Planos, Usuï¿½rios e Assinaturas) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -2880,7 +2880,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -2976,7 +2976,7 @@ BT
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 708.6616535433070112 Td
-(3.5 Landing Page — Autenticação e Sessão) Tj
+(3.5 Landing Page ï¿½ Autenticaï¿½ï¿½o e Sessï¿½o) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -3017,7 +3017,7 @@ BT
 9.7749999999999986 TL
 0.122 0.161 0.216 rg
 102.0472440944882067 663.5907874015747439 Td
-(Cadastra associado pela LP. Cria sessão \(cookie) Tj
+(Cadastra associado pela LP. Cria sessï¿½o \(cookie) Tj
 ET
 0.95 0.96 0.98 rg
 45.354330708661422 649.9844881889763428 504.5669291338583093 -24.6614173228346445 re
@@ -3169,7 +3169,7 @@ BT
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 515.3388188976377933 Td
-(3.6 Landing Page — Hotéis e Reservas) Tj
+(3.6 Landing Page ï¿½ Hotï¿½is e Reservas) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -3529,7 +3529,7 @@ BT
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 172.346692913385823 Td
-(3.7 Vindi — Pagamentos) Tj
+(3.7 Vindi ï¿½ Pagamentos) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -3650,7 +3650,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -3758,7 +3758,7 @@ BT
 9.7749999999999986 TL
 0.122 0.161 0.216 rg
 102.0472440944882067 690.5199212598424765 Td
-(Lista pagamentos com filtros \(status, método, busca\) e) Tj
+(Lista pagamentos com filtros \(status, mï¿½todo, busca\) e) Tj
 ET
 0.95 0.96 0.98 rg
 45.354330708661422 676.9136220472440755 504.5669291338583093 -24.6614173228346445 re
@@ -4009,7 +4009,7 @@ BT
 14.9499999999999993 TL
 0.18 0.384 0.6 rg
 45.354330708661422 441.6380314960629789 Td
-(3.10 WhatsApp — Configuração, Fluxos e Logs) Tj
+(3.10 WhatsApp ï¿½ Configuraï¿½ï¿½o, Fluxos e Logs) Tj
 ET
 0.3 0.64 1. RG
 1.1338582677165356 w
@@ -4432,7 +4432,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -4637,7 +4637,7 @@ BT
 9.1999999999999993 TL
 0.42 0.447 0.502 rg
 45.354330708661422 25.5120472440943331 Td
-(UNYCO CRM · Catálogo de APIs) Tj
+(UNYCO CRM ï¿½ Catï¿½logo de APIs) Tj
 ET
 BT
 /F1 8 Tf
@@ -4668,7 +4668,7 @@ BT
 10.3499999999999996 TL
 1. g
 413.0312598425197166 816.3781889763779418 Td
-(4. Eventos e Gatilhos Automáticos) Tj
+(4. Eventos e Gatilhos Automï¿½ticos) Tj
 ET
 0.3 0.64 1. rg
 45.354330708661422 773.8585039370078675 11.3385826771653555 -25.5118110236220517 re
@@ -4678,14 +4678,14 @@ BT
 23. TL
 0.18 0.384 0.6 rg
 68.031496062992133 754.0159842519684616 Td
-(4. Eventos e Gatilhos Automáticos) Tj
+(4. Eventos e Gatilhos Automï¿½ticos) Tj
 ET
 BT
 /F1 10 Tf
 11.5 TL
 0.122 0.161 0.216 rg
 45.354330708661422 722.8348818897637784 Td
-(Algumas rotas internas disparam, em segundo plano, fluxos automáticos de WhatsApp configurados na tabela) Tj
+(Algumas rotas internas disparam, em segundo plano, fluxos automï¿½ticos de WhatsApp configurados na tabela) Tj
 ET
 BT
 /F1 10 Tf
@@ -4740,7 +4740,7 @@ BT
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 622.2049606299212883 Td
-(Variáveis disponíveis: nome, hotel, checkin, checkout, localizador, valor.) Tj
+(Variï¿½veis disponï¿½veis: nome, hotel, checkin, checkout, localizador, valor.) Tj
 ET
 0.95 0.96 0.98 rg
 51.0236220472441033 598.1104724409448181 m
@@ -4776,7 +4776,7 @@ BT
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 557.0081102362204319 Td
-(Variáveis disponíveis: nome, hotel, checkin, checkout, localizador, valor.) Tj
+(Variï¿½veis disponï¿½veis: nome, hotel, checkin, checkout, localizador, valor.) Tj
 ET
 0.95 0.96 0.98 rg
 51.0236220472441033 532.9136220472440755 m
@@ -4812,7 +4812,7 @@ BT
 10.3499999999999996 TL
 0.122 0.161 0.216 rg
 56.6929133858267775 491.8112598425196325 Td
-(Variáveis disponíveis: nome.) Tj
+(Variï¿½veis disponï¿½veis: nome.) Tj
 ET
 endstream
 endobj
