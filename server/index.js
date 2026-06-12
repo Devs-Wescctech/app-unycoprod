@@ -2966,11 +2966,20 @@ app.get('/api/lp/market-prices', async (req, res) => {
       }
 
       // Monta as fontes do comparativo — apenas as mais caras que a tarifa fixa Unyco.
+      // Filtra fontes que parecem site/OTA (têm ponto no nome: "Booking.com", "Expedia.com.br")
+      // ou são nomes genéricos conhecidos. Exclui nomes de hotéis/propriedades sem domínio.
+      const OTA_GENERIC = new Set([
+        'Google Hotels', 'Official Site', 'Direct',
+        'eDreams', 'Agoda', 'Trivago', 'Kayak', 'Priceline', 'Orbitz',
+        'Despegar', 'Decolar', 'Hurb', 'MaxMilhas', 'CVC', 'Submarino Viagens',
+        'HotelsCombined', 'Skyscanner', 'Momondo', 'Hotwire',
+      ]);
+      const isOTASource = (s) => /\.\w{2,}/.test(s) || OTA_GENERIC.has(s);
       const sourcePrices = [];
       if (unycoPrice) {
         for (const [source, price] of realSources.entries()) {
           const rp = Math.round(price);
-          if (rp > unycoPrice) sourcePrices.push({ source, price: rp });
+          if (rp > unycoPrice && isOTASource(source)) sourcePrices.push({ source, price: rp });
         }
         // Fallback: nenhuma OTA capturada → mostra ao menos o agregado "Google Hotels".
         if (sourcePrices.length === 0 && marketPrice && marketPrice > unycoPrice) {
