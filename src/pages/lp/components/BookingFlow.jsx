@@ -329,29 +329,9 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
       }
 
       setCheckingAvailability(false);
-      setConfirming(true);
-
-      const confirmRes = await fetch('/api/lp/booking-confirmation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          booking_code: apt.booking_code,
-          hotel_id: hotel.id,
-        }),
-      });
-      const confirmData = await confirmRes.json();
-      setBookingResult(confirmData);
-
-      if (!confirmData.ok || !confirmData.data?.localizador) {
-        setError(confirmData.data?.mensagem || 'Não foi possível confirmar a reserva. Tente novamente.');
-        return;
-      }
-
-      setBookingLocator(confirmData.data.localizador);
       setStep(3);
     } catch {
-      setError('Erro de conexão ao confirmar reserva. Tente novamente.');
+      setError('Erro de conexão ao verificar disponibilidade. Tente novamente.');
     } finally {
       setReserving(false);
       setCheckingAvailability(false);
@@ -368,9 +348,31 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
     setStep(4);
     setPaymentCompleted(true);
 
-    if (!bookingLocator) {
-      setError('Reserva não foi confirmada antes do pagamento. Entre em contato com o suporte.');
-      return;
+    let localizador = bookingLocator;
+
+    if (!localizador) {
+      try {
+        const confirmRes = await fetch('/api/lp/booking-confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            booking_code: selectedApartment.booking_code,
+            hotel_id: hotel.id,
+          }),
+        });
+        const confirmData = await confirmRes.json();
+        if (confirmData.ok && confirmData.data?.localizador) {
+          localizador = confirmData.data.localizador;
+          setBookingLocator(localizador);
+        } else {
+          console.error('Falha ao confirmar reserva na Coobmais após pagamento:', confirmData);
+          setError('Pagamento aprovado, mas não foi possível confirmar a reserva automaticamente. Entre em contato com o suporte informando seu pagamento.');
+        }
+      } catch (e) {
+        console.error('Erro ao confirmar reserva na Coobmais:', e);
+        setError('Pagamento aprovado, mas ocorreu um erro ao confirmar a reserva. Entre em contato com o suporte.');
+      }
     }
 
     try {
@@ -387,7 +389,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
           apartment_type: selectedApartment.type || selectedApartment.nomenclature || '',
           apartment_description: selectedApartment.accommodation_description || '',
           booking_code: selectedApartment.booking_code,
-          localizador: bookingLocator,
+          localizador: localizador,
           check_in: (effectiveDates?.checkIn || searchParams?.checkIn) ? format(effectiveDates?.checkIn || searchParams.checkIn, 'yyyy-MM-dd') : null,
           check_out: (effectiveDates?.checkOut || searchParams?.checkOut) ? format(effectiveDates?.checkOut || searchParams.checkOut, 'yyyy-MM-dd') : null,
           adults: searchParams?.adults || 1,
@@ -406,7 +408,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
 
     if (paymentResult?.bill_id) {
       try {
-        await fetch(`/api/lp/bookings/${bookingLocator}/link-payment`, {
+        await fetch(`/api/lp/bookings/${localizador}/link-payment`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',

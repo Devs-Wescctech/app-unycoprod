@@ -30,7 +30,28 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/home', (req, res) => res.redirect(302, '/'));
 app.get('/lp/home', (req, res) => res.redirect(302, '/'));
 app.get('/lp/home/', (req, res) => res.redirect(302, '/'));
-app.use('/lp', express.static(path.join(__dirname, '../public/lp')));
+
+const LP_HTML_FILES = ['index.html', 'checkout.html', 'home-legacy.html'];
+
+async function serveLpHtml(file, res) {
+  const filePath = path.join(__dirname, '../public/lp', file);
+  if (!fs.existsSync(filePath)) return res.status(404).send('Not found');
+  try {
+    const html = fs.readFileSync(filePath, 'utf-8');
+    const scripts = await getCustomHeadScripts();
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(injectHeadScripts(html, scripts));
+  } catch (e) {
+    res.status(500).send('Server error');
+  }
+}
+
+app.get('/lp/', (req, res) => serveLpHtml('index.html', res));
+LP_HTML_FILES.forEach(file => {
+  app.get(`/lp/${file}`, (req, res) => serveLpHtml(file, res));
+});
+
+app.use('/lp', express.static(path.join(__dirname, '../public/lp'), { index: false }));
 // Serve hero video with explicit range-request streaming (bypasses CDN caching issues)
 const VIDEO_CANDIDATES = [
   path.join(__dirname, '../dist/hero-video.mp4'),
@@ -71,12 +92,49 @@ app.get('/hero-video.mp4', (req, res) => {
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+let headScriptsCache = null;
+
+const crmSessions = new Map(); // token → { role, createdAt }
+
+function requireCrmAdmin(req, res, next) {
+  const auth = req.headers['authorization'] || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token) return res.status(403).json({ ok: false, error: 'Não autorizado' });
+  const session = crmSessions.get(token);
+  if (!session || session.role !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Sessão inválida ou sem permissão de admin' });
+  }
+  if (Date.now() - session.createdAt > 8 * 3600000) {
+    crmSessions.delete(token);
+    return res.status(403).json({ ok: false, error: 'Sessão expirada. Faça login novamente.' });
+  }
+  next();
+}
+
+async function getCustomHeadScripts() {
+  if (headScriptsCache !== null) return headScriptsCache;
+  try {
+    const result = await query("SELECT value FROM system_config WHERE key = 'custom_head_scripts'");
+    const raw = result.rows.length > 0 ? result.rows[0].value : '';
+    headScriptsCache = typeof raw === 'string' ? raw : (raw || '');
+  } catch (e) {
+    headScriptsCache = '';
+  }
+  return headScriptsCache;
+}
+
+function injectHeadScripts(html, scripts) {
+  if (!scripts) return html;
+  return html.replace('</head>', `${scripts}\n</head>`);
+}
+
 if (isProduction) {
   app.use('/assets', express.static(path.join(__dirname, '../dist/assets'), {
     maxAge: '1y',
     immutable: true,
   }));
   app.use(express.static(path.join(__dirname, '../dist'), {
+    index: false,
     maxAge: '0',
     etag: true,
     setHeaders: (res, filePath) => {
@@ -1834,6 +1892,46 @@ app.get('/api/config', async (req, res) => {
     const config = {};
     result.rows.forEach(r => { config[r.key] = r.value; });
     res.json({ ok: true, config, rows: result.rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/config/head-scripts', async (req, res) => {
+  try {
+    const result = await query("SELECT value FROM system_config WHERE key = 'custom_head_scripts'");
+    const raw = result.rows.length > 0 ? result.rows[0].value : '';
+    const scripts = typeof raw === 'string' ? raw : (raw || '');
+    res.json({ ok: true, scripts });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/crm/login', (req, res) => {
+  const { email, password, role } = req.body || {};
+  if (role !== 'admin' || typeof email !== 'string') {
+    return res.status(401).json({ ok: false, error: 'Perfil sem permissão de admin' });
+  }
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (adminPassword && password !== adminPassword) {
+    return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  crmSessions.set(token, { role: 'admin', createdAt: Date.now() });
+  res.json({ ok: true, token });
+});
+
+app.put('/api/config/head-scripts', requireCrmAdmin, async (req, res) => {
+  try {
+    const { scripts } = req.body;
+    const value = typeof scripts === 'string' ? scripts : '';
+    await query(
+      "INSERT INTO system_config (key, value, updated_at) VALUES ('custom_head_scripts', $1, NOW()) ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()",
+      [JSON.stringify(value)]
+    );
+    headScriptsCache = value;
+    res.json({ ok: true, message: 'Scripts personalizados atualizados' });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -5600,9 +5698,18 @@ app.get('/api/email/stats', async (req, res) => {
 });
 
 if (isProduction) {
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/') && !req.path.startsWith('/lp/')) {
-      res.sendFile(path.join(__dirname, '../dist/index.html'));
+      const filePath = path.join(__dirname, '../dist/index.html');
+      if (!fs.existsSync(filePath)) return res.status(404).send('Not found');
+      try {
+        const html = fs.readFileSync(filePath, 'utf-8');
+        const scripts = await getCustomHeadScripts();
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(injectHeadScripts(html, scripts));
+      } catch (e) {
+        res.sendFile(filePath);
+      }
     } else {
       next();
     }

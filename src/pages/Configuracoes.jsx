@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Settings, CreditCard, Loader2, RefreshCw, Save, Hotel, Sparkles, Crown, Gem, CheckCircle2, AlertTriangle, Sun, Snowflake, Calendar, Database, Trash2, TrendingUp } from 'lucide-react';
+import { Settings, CreditCard, Loader2, RefreshCw, Save, Hotel, Sparkles, Crown, Gem, CheckCircle2, AlertTriangle, Sun, Snowflake, Calendar, Database, Trash2, TrendingUp, Code } from 'lucide-react';
 import { useSystemConfig, useUpdateConfig } from '@/hooks/useSystemConfig';
+import { useAuth } from '@/contexts/AuthContext';
 import { Toaster, toast } from 'sonner';
 
 function formatCurrency(value) {
@@ -481,9 +482,112 @@ function CacheSection() {
   );
 }
 
+function HeadScriptsSection() {
+  const [scripts, setScripts] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/config/head-scripts')
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) setScripts(data.scripts || '');
+      })
+      .catch(() => toast.error('Erro ao carregar scripts personalizados'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    const token = sessionStorage.getItem('crm_admin_token') || '';
+    if (!token) {
+      toast.error('Sessão admin não encontrada. Faça logout e login novamente.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/config/head-scripts', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ scripts }),
+      });
+      const data = await res.json();
+      if (res.status === 403) {
+        toast.error('Sessão expirada ou inválida. Faça logout e login novamente.');
+      } else if (data.ok) {
+        toast.success('Scripts personalizados salvos com sucesso');
+      } else {
+        toast.error(data.error || 'Erro ao salvar');
+      }
+    } catch {
+      toast.error('Erro de conexão');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
+  const hasToken = !!sessionStorage.getItem('crm_admin_token');
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+      <div className="px-6 py-4 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <Code className="w-5 h-5 text-violet-600" />
+          <h2 className="text-lg font-semibold text-slate-700">Scripts Personalizados no <code className="text-sm bg-slate-100 px-1.5 py-0.5 rounded">&lt;head&gt;</code></h2>
+        </div>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Cole aqui tags <code className="text-xs bg-slate-100 px-1 rounded">&lt;script&gt;</code>, <code className="text-xs bg-slate-100 px-1 rounded">&lt;meta&gt;</code> ou <code className="text-xs bg-slate-100 px-1 rounded">&lt;link&gt;</code> para injetar em todas as páginas do site (LP e CRM) sem precisar de deploy.
+        </p>
+      </div>
+      <div className="p-6 space-y-4">
+        {!hasToken && (
+          <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+            <span>⚠️</span>
+            <span>Sessão admin não ativa. Faça logout e login novamente para habilitar a edição. Certifique-se que <code className="bg-amber-100 px-1 rounded">ADMIN_PASSWORD</code> está configurado no servidor.</span>
+          </div>
+        )}
+        <textarea
+          value={scripts}
+          onChange={e => setScripts(e.target.value)}
+          placeholder={'<script src="https://exemplo.com/pixel.js"></script>'}
+          rows={6}
+          disabled={!hasToken}
+          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 transition-all resize-y disabled:opacity-50 disabled:cursor-not-allowed"
+          spellCheck={false}
+        />
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-slate-400">
+            O conteúdo é injetado imediatamente antes de <code className="bg-slate-100 px-1 rounded">&lt;/head&gt;</code> em todas as páginas pelo servidor.
+          </p>
+          <button
+            onClick={handleSave}
+            disabled={saving || !hasToken}
+            className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-300 text-white font-semibold rounded-lg text-sm transition-colors"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {saving ? 'Salvando...' : 'Salvar Scripts'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Configuracoes() {
   const { config, plansEnabled, isLoading } = useSystemConfig();
   const updateConfig = useUpdateConfig();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const handleTogglePlans = async () => {
     const newValue = !plansEnabled;
@@ -565,6 +669,7 @@ export default function Configuracoes() {
       <SeasonConfigSection />
       <CategoryRatesSection />
       <CacheSection />
+      {isAdmin && <HeadScriptsSection />}
     </div>
   );
 }

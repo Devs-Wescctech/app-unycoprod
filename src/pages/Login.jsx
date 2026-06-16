@@ -68,7 +68,7 @@ export default function Login() {
 
     await new Promise(r => setTimeout(r, 500));
 
-    const result = login(email, password);
+    const result = await login(email, password);
     
     if (result.success) {
       toast.success('Login realizado com sucesso!');

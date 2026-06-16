@@ -64,12 +64,29 @@ export function AuthProvider({ children }) {
     }
   }, [users]);
 
-  const login = (email, password) => {
+  const login = async (email, password) => {
     const foundUser = users.find(
       u => u.email.toLowerCase() === email.toLowerCase() && u.password === password && u.active
     );
     
     if (foundUser) {
+      if (foundUser.role === 'admin') {
+        try {
+          const r = await fetch('/api/crm/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, role: 'admin' }),
+          });
+          const d = await r.json();
+          if (d.ok && d.token) {
+            sessionStorage.setItem('crm_admin_token', d.token);
+          } else {
+            sessionStorage.removeItem('crm_admin_token');
+          }
+        } catch (_) {
+          sessionStorage.removeItem('crm_admin_token');
+        }
+      }
       const userSession = { ...foundUser };
       delete userSession.password;
       setUser(userSession);
@@ -83,6 +100,7 @@ export function AuthProvider({ children }) {
   const logout = () => {
     setUser(null);
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    sessionStorage.removeItem('crm_admin_token');
   };
 
   const hasPermission = (permission) => {
