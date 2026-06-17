@@ -311,6 +311,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
     setCheckingAvailability(true);
 
     try {
+      const cleanPhone = (user?.phone || '').replace(/\D/g, '');
       const availRes = await fetch('/api/lp/availability-book', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -318,6 +319,11 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
         body: JSON.stringify({
           booking_code: apt.booking_code,
           hotel_id: hotel.id,
+          third_guest_name: user?.name || '',
+          third_guest_cpf: (user?.cpf || '').replace(/\D/g, ''),
+          third_guest_ddd: cleanPhone.substring(0, 2),
+          third_guest_cellphone: cleanPhone.substring(2),
+          third_guest_email: user?.email || '',
         }),
       });
       const availData = await availRes.json();
@@ -352,6 +358,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
 
     if (!localizador) {
       try {
+        const cleanPhoneConf = (user?.phone || '').replace(/\D/g, '');
         const confirmRes = await fetch('/api/lp/booking-confirmation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -359,6 +366,11 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
           body: JSON.stringify({
             booking_code: selectedApartment.booking_code,
             hotel_id: hotel.id,
+            third_guest_name: user?.name || '',
+            third_guest_cpf: (user?.cpf || '').replace(/\D/g, ''),
+            third_guest_ddd: cleanPhoneConf.substring(0, 2),
+            third_guest_cellphone: cleanPhoneConf.substring(2),
+            third_guest_email: user?.email || '',
           }),
         });
         const confirmData = await confirmRes.json();

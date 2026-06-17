@@ -3667,7 +3667,7 @@ app.post('/api/lp/availability-book', async (req, res) => {
     const session = getLpSession(lpToken);
     if (!session) return res.status(401).json({ ok: false, error: 'Sessão expirada' });
 
-    const { booking_code, hotel_id } = req.body;
+    const { booking_code, hotel_id, third_guest_name, third_guest_cpf, third_guest_ddd, third_guest_cellphone, third_guest_email } = req.body;
     if (!booking_code || !hotel_id) {
       return res.status(400).json({ ok: false, error: 'booking_code e hotel_id são obrigatórios' });
     }
@@ -3691,7 +3691,12 @@ app.post('/api/lp/availability-book', async (req, res) => {
         cpf: BOOKING_CNPJ,
         hotel_id: parseInt(hotel_id),
         vfb_points: 0,
-        vfb_identifier: vfbId
+        vfb_identifier: vfbId,
+        third_guest_name: third_guest_name || '',
+        third_guest_cpf: (third_guest_cpf || '').replace(/\D/g, ''),
+        third_guest_ddd: third_guest_ddd || '',
+        third_guest_cellphone: third_guest_cellphone || '',
+        third_guest_email: third_guest_email || ''
       })
     });
 
@@ -3715,7 +3720,7 @@ app.post('/api/lp/booking-confirmation', async (req, res) => {
     const session = getLpSession(lpToken);
     if (!session) return res.status(401).json({ ok: false, error: 'Sessão expirada' });
 
-    const { booking_code, hotel_id } = req.body;
+    const { booking_code, hotel_id, third_guest_name, third_guest_cpf, third_guest_ddd, third_guest_cellphone, third_guest_email } = req.body;
     if (!booking_code || !hotel_id) {
       return res.status(400).json({ ok: false, error: 'booking_code e hotel_id são obrigatórios' });
     }
@@ -3738,7 +3743,12 @@ app.post('/api/lp/booking-confirmation', async (req, res) => {
         cpf: BOOKING_CNPJ,
         hotel_id: parseInt(hotel_id),
         vfb_points: 0,
-        vfb_identifier: vfbId
+        vfb_identifier: vfbId,
+        third_guest_name: third_guest_name || '',
+        third_guest_cpf: (third_guest_cpf || '').replace(/\D/g, ''),
+        third_guest_ddd: third_guest_ddd || '',
+        third_guest_cellphone: third_guest_cellphone || '',
+        third_guest_email: third_guest_email || ''
       })
     });
 
