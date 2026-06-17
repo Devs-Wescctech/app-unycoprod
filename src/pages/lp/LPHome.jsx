@@ -802,9 +802,10 @@ export default function LPHome() {
                 <div className="flex flex-wrap justify-center gap-2 mb-8">
                   {marketPrices.map((h, i) => {
                     const u = h.unycoPrice || 0;
-                    const m = h.marketPrice || 0;
-                    const citySavings = u > 0 && m > 0 && u < m
-                      ? Math.round(((m - u) / m) * 100) : 0;
+                    const sp = h.sourcePrices || [];
+                    const minOta = sp.length > 0 ? Math.min(...sp.map(s => s.price)) : (h.marketPrice || 0);
+                    const citySavings = u > 0 && minOta > 0 && u < minOta
+                      ? Math.round(((minOta - u) / minOta) * 100) : 0;
                     return (
                       <button
                         key={i}
@@ -841,8 +842,12 @@ export default function LPHome() {
                 const cityLabel = hotel.city.toLowerCase().replace(/(?:^|[\s-])(\w)/g, c => c.toUpperCase());
                 const sourcePrices = hotel.sourcePrices || [];
                 const topSource = sourcePrices[0] || (marketPrice ? { source: 'Google Hotels', price: marketPrice } : null);
-                const savings = unycoPrice > 0 && marketPrice && unycoPrice < marketPrice
-                  ? Math.round(((marketPrice - unycoPrice) / marketPrice) * 100) : 0;
+                const minOtaPrice = sourcePrices.length > 0
+                  ? Math.min(...sourcePrices.map(sp => sp.price))
+                  : (marketPrice || 0);
+                const savings = unycoPrice > 0 && minOtaPrice > 0 && unycoPrice < minOtaPrice
+                  ? Math.round(((minOtaPrice - unycoPrice) / minOtaPrice) * 100) : 0;
+                const savingsAmount = minOtaPrice > 0 ? Math.round(minOtaPrice - unycoPrice) : 0;
                 const SOURCE_COLORS = ['#3b82f6', '#f59e0b', '#a855f7', '#ef4444'];
                 const rows = [
                   ...(unycoPrice > 0 ? [{ label: 'Unyco (você paga)', value: unycoPrice, color: '#10b981', isUnyco: true }] : []),
@@ -859,7 +864,7 @@ export default function LPHome() {
                         <>
                           <p className="text-emerald-300 text-sm mb-1">Sua economia por noite em {cityLabel}</p>
                           <p className="text-white text-3xl font-black">
-                            R${marketPrice - unycoPrice}{' '}
+                            R${savingsAmount}{' '}
                             <span className="text-emerald-400 text-lg font-bold">({savings}% menos)</span>
                           </p>
                         </>
