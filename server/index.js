@@ -2903,6 +2903,38 @@ function highSeasonWindows(highMonths) {
 
 const FALLBACK_MONTH_OFFSETS = [2, 1, 3, 4, 6, 5];
 
+// Allowlist estrita de plataformas OTA reconhecidas para o Comparativo de Preços.
+// Apenas fontes desta lista aparecem no comparativo — nomes de hotéis, marcas regionais
+// desconhecidas e plataformas de nicho são automaticamente excluídos.
+const KNOWN_OTAS = new Set([
+  'booking.com', 'expedia', 'expedia.com', 'hotels.com', 'airbnb', 'decolar',
+  'hurb', 'cvc', 'kayak', 'trivago', 'agoda', 'maxmilhas', 'submarino viagens',
+  'trip.com', 'priceline', 'hotelscombined', 'skyscanner', 'momondo', 'edreams',
+  'hotwire', 'google hotels',
+]);
+
+// Retorna true se a fonte (OTA) está na allowlist (comparação case-insensitive).
+function isOTASource(s) {
+  return KNOWN_OTAS.has((s || '').toLowerCase().trim());
+}
+
+// Recalcula sourcePrices de um hotel a partir de rawSources usando a allowlist vigente.
+// unycoPrice é o preço fixo Unyco; só exibe fontes mais caras.
+function recomputeSourcePrices(rawSources, unycoPrice, marketPrice) {
+  if (!rawSources || typeof rawSources !== 'object') return [];
+  const sourcePrices = [];
+  for (const [source, price] of Object.entries(rawSources)) {
+    const rp = Math.round(Number(price));
+    if (rp > (unycoPrice || 0) && isOTASource(source)) sourcePrices.push({ source, price: rp });
+  }
+  if (sourcePrices.length === 0 && marketPrice && marketPrice > (unycoPrice || 0)) {
+    sourcePrices.push({ source: 'Google Hotels', price: marketPrice });
+  }
+  sourcePrices.sort((a, b) => b.price - a.price);
+  sourcePrices.splice(5);
+  return sourcePrices;
+}
+
 app.get('/api/lp/market-prices', async (req, res) => {
   const primaryDates = buildDateWindow(2);
 
@@ -2921,9 +2953,15 @@ app.get('/api/lp/market-prices', async (req, res) => {
       const cachedAt = new Date(dbRow.rows[0].updated_at).getTime();
       const age = Date.now() - cachedAt;
       if (age < SNAPSHOT_TTL_MS && hasVisible(dbRow.rows[0].value.data)) {
-        marketPricesByDate.set('current', { data: dbRow.rows[0].value.data, ts: Date.now() });
-        console.log(`[MARKET PRICES] DB blob hit (${Math.round(age / 86400000)}d old)`);
-        return res.json({ ok: true, data: dbRow.rows[0].value.data, cached: 'db' });
+        // Reaplicar a allowlist KNOWN_OTAS vigente sobre os rawSources do blob,
+        // garantindo que mudanças de deploy na allowlist sejam aplicadas sem nova consulta SerpAPI.
+        const data = dbRow.rows[0].value.data.map(h => {
+          if (!h.rawSources) return h;
+          return { ...h, sourcePrices: recomputeSourcePrices(h.rawSources, h.unycoPrice, h.marketPrice) };
+        });
+        marketPricesByDate.set('current', { data, ts: Date.now() });
+        console.log(`[MARKET PRICES] DB blob hit (${Math.round(age / 86400000)}d old) — allowlist reaplicada`);
+        return res.json({ ok: true, data, cached: 'db' });
       }
     }
   } catch (e) {
@@ -3063,30 +3101,14 @@ app.get('/api/lp/market-prices', async (req, res) => {
         }
       }
 
-      // Monta as fontes do comparativo — apenas as mais caras que a tarifa fixa Unyco.
-      // Filtra fontes que parecem site/OTA (têm ponto no nome: "Booking.com", "Expedia.com.br")
-      // ou são nomes genéricos conhecidos. Exclui nomes de hotéis/propriedades sem domínio.
-      const OTA_GENERIC = new Set([
-        'Google Hotels', 'Official Site', 'Direct',
-        'eDreams', 'Agoda', 'Trivago', 'Kayak', 'Priceline', 'Orbitz',
-        'Despegar', 'Decolar', 'Hurb', 'MaxMilhas', 'CVC', 'Submarino Viagens',
-        'HotelsCombined', 'Skyscanner', 'Momondo', 'Hotwire',
-      ]);
-      const isOTASource = (s) => /\.\w{2,}/.test(s) || OTA_GENERIC.has(s);
-      const sourcePrices = [];
-      if (unycoPrice) {
-        for (const [source, price] of realSources.entries()) {
-          const rp = Math.round(price);
-          if (rp > unycoPrice && isOTASource(source)) sourcePrices.push({ source, price: rp });
-        }
-        // Fallback: nenhuma OTA capturada → mostra ao menos o agregado "Google Hotels".
-        if (sourcePrices.length === 0 && marketPrice && marketPrice > unycoPrice) {
-          sourcePrices.push({ source: 'Google Hotels', price: marketPrice });
-        }
-        // Ordena do mais caro ao mais barato e limita a 5 fontes.
-        sourcePrices.sort((a, b) => b.price - a.price);
-        sourcePrices.splice(5);
-      }
+      // Salva rawSources (todas as fontes brutas da SerpAPI) para permitir reaplicação
+      // da allowlist KNOWN_OTAS sem precisar chamar a SerpAPI novamente.
+      const rawSources = {};
+      for (const [source, price] of realSources.entries()) rawSources[source] = Math.round(price);
+
+      // Monta as fontes do comparativo aplicando a allowlist KNOWN_OTAS.
+      // Apenas fontes reconhecidas e mais caras que a tarifa Unyco são exibidas.
+      const sourcePrices = recomputeSourcePrices(rawSources, unycoPrice, marketPrice);
 
       // Persiste snapshot por cidade (90 dias) para o card verde reaproveitar sem chamar SerpAPI
       if (chosenSerp && (chosenSerp.median || chosenSerp.max) && hotel.city) {
@@ -3117,6 +3139,7 @@ app.get('/api/lp/market-prices', async (req, res) => {
         marketHigh: marketPrice,
         marketMedian: marketPrice,
         sourcePrices,
+        rawSources,
       });
   }
 
@@ -3204,6 +3227,35 @@ app.get('/api/lp/serp-prices', async (req, res) => {
   }
 });
 
+// Reaplicar allowlist KNOWN_OTAS ao blob existente sem chamar a SerpAPI.
+// Útil após deploy com nova allowlist: os rawSources já estão no banco.
+app.post('/api/admin/market-prices/refilter', async (req, res) => {
+  try {
+    const dbRow = await query("SELECT value FROM system_config WHERE key = 'market_prices_cache'");
+    if (!dbRow.rows.length || !dbRow.rows[0].value?.data) {
+      return res.json({ ok: false, error: 'Nenhum blob encontrado. Execute "Atualizar preços" primeiro.' });
+    }
+    const original = dbRow.rows[0].value.data;
+    let refiltered = 0;
+    const data = original.map(h => {
+      if (!h.rawSources) return h;
+      refiltered++;
+      return { ...h, sourcePrices: recomputeSourcePrices(h.rawSources, h.unycoPrice, h.marketPrice) };
+    });
+    await query(
+      `INSERT INTO system_config (key, value, updated_at) VALUES ('market_prices_cache', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+      [JSON.stringify({ data })]
+    );
+    marketPricesByDate.clear();
+    console.log(`[REFILTER] Allowlist reaplicada: ${refiltered} hotéis re-filtrados`);
+    res.json({ ok: true, total: original.length, refiltered });
+  } catch (e) {
+    console.error('[REFILTER] Error:', e.message);
+    res.status(500).json({ ok: false, error: 'Erro ao reaplicar filtros', detail: e.message });
+  }
+});
+
 app.post('/api/admin/market-prices/refresh', async (req, res) => {
   const cities = req.body?.cities || FEATURED_CITIES.map(c => c.toLowerCase());
   const months = req.body?.months || [1,2,3,4,5,6,7,8,9,10,11,12];
@@ -3255,23 +3307,29 @@ app.post('/api/admin/caches/clear', async (req, res) => {
     serpSearchCache.clear();
     featuredHotelsCache = { data: null, ts: 0 };
 
-    // Também remove os caches persistidos no banco (comparativo de preços + snapshots por cidade),
-    // senão o blob de 90 dias continua sendo servido após o "Limpar caches" e o comparativo não reseta.
-    let marketPricesBlob = 0, marketSnapshots = 0;
+    // Remove o blob do comparativo (preços por OTA, 90d) do banco.
+    // Os market_price_snapshots (card verde / carrossel) são preservados por padrão —
+    // eles representam créditos SerpAPI já gastos e têm botão separado para limpeza.
+    let marketPricesBlob = 0;
     try {
       const r1 = await query("DELETE FROM system_config WHERE key = 'market_prices_cache'");
       marketPricesBlob = r1.rowCount || 0;
     } catch (e) {
       console.warn('[CACHE CLEAR] Erro ao remover blob market_prices_cache:', e.message);
     }
-    try {
-      const r2 = await query('DELETE FROM market_price_snapshots');
-      marketSnapshots = r2.rowCount || 0;
-    } catch (e) {
-      console.warn('[CACHE CLEAR] Erro ao remover market_price_snapshots:', e.message);
-    }
     cleared.marketPricesBlob = marketPricesBlob;
-    cleared.marketSnapshots = marketSnapshots;
+
+    // Se clearSnapshots=true foi passado explicitamente, apaga os snapshots também.
+    if (req.body?.clearSnapshots === true) {
+      let marketSnapshots = 0;
+      try {
+        const r2 = await query('DELETE FROM market_price_snapshots');
+        marketSnapshots = r2.rowCount || 0;
+      } catch (e) {
+        console.warn('[CACHE CLEAR] Erro ao remover market_price_snapshots:', e.message);
+      }
+      cleared.marketSnapshots = marketSnapshots;
+    }
 
     const total = Object.values(cleared).reduce((a, b) => a + b, 0);
     console.log(`[CACHE CLEAR] Cleared ${total} entries`, cleared);

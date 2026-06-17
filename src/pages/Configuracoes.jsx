@@ -345,6 +345,7 @@ function CacheSection() {
   const [refreshing, setRefreshing] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearingComparativo, setClearingComparativo] = useState(false);
+  const [refiltering, setRefiltering] = useState(false);
 
   const handleRefreshMarket = async () => {
     setRefreshing(true);
@@ -378,6 +379,23 @@ function CacheSection() {
       toast.error('Erro de conexão ao limpar caches');
     } finally {
       setClearing(false);
+    }
+  };
+
+  const handleRefilter = async () => {
+    setRefiltering(true);
+    try {
+      const res = await fetch('/api/admin/market-prices/refilter', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(`Filtros reaplicados: ${data.refiltered} de ${data.total} hotel${data.total === 1 ? '' : 'is'} atualizados`);
+      } else {
+        toast.error(data.error || 'Erro ao reaplicar filtros');
+      }
+    } catch {
+      toast.error('Erro de conexão ao reaplicar filtros');
+    } finally {
+      setRefiltering(false);
     }
   };
 
@@ -475,6 +493,26 @@ function CacheSection() {
           >
             {clearingComparativo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
             {clearingComparativo ? 'Limpando...' : 'Limpar comparativo'}
+          </button>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0">
+              <RefreshCw className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-800 text-sm">Reaplicar filtros do comparativo</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Aplica a lista de OTAs reconhecidas ao blob existente — sem chamar a SerpAPI. Use após deploy com lista de OTAs atualizada.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleRefilter}
+            disabled={refiltering || refreshing || clearing}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-300 text-white font-semibold rounded-lg text-sm transition-colors shrink-0"
+          >
+            {refiltering ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {refiltering ? 'Reaplicando...' : 'Reaplicar filtros'}
           </button>
         </div>
       </div>
