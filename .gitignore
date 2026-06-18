@@ -9,14 +9,16 @@ npm-debug.log*
 *.local
 .vite/
 
-# Replit local files
+# Replit / editor local files
 .canvas/
 .local/
 .replit
+replit.md
 attached_assets/
 .config/
 .cache/
 .upm/
+.agents/
 
 # Runtime / sensitive
 server/api-config.json
