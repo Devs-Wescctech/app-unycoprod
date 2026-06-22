@@ -26,6 +26,13 @@ function formatCurrency(value) {
   return (value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function fmtBR(date) {
+  if (!date) return '';
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d)) return '';
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}
+
 function detectCardBrand(number) {
   const n = (number || '').replace(/\s/g, '');
   if (/^4/.test(n)) return { code: 'visa', name: 'Visa' };
@@ -243,6 +250,12 @@ export default function PaymentFlow({ hotel, apartment, searchParams, user, book
         description: `Hospedagem - ${hotel?.name || 'Hotel'} - ${apartment?.type || 'Apartamento'}`,
         booking_locator: bookingLocator || '',
         hotel_name: hotel?.name || '',
+        hotel_id: hotel?.id,
+        booking_code: apartment?.booking_code,
+        check_in: fmtBR(searchParams?.checkIn),
+        check_out: fmtBR(searchParams?.checkOut),
+        adults: searchParams?.adults || 2,
+        children: searchParams?.children || 0,
         installments: method === 'cartao_unyco' ? installments : 1,
       };
 

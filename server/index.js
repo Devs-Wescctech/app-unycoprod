@@ -3778,9 +3778,19 @@ app.post('/api/lp/booking-confirmation', async (req, res) => {
     const session = getLpSession(lpToken);
     if (!session) return res.status(401).json({ ok: false, error: 'Sessão expirada' });
 
-    const { booking_code, hotel_id, third_guest_name, third_guest_cpf, third_guest_ddd, third_guest_cellphone, third_guest_email } = req.body;
+    const { booking_code, hotel_id, bill_id, third_guest_name, third_guest_cpf, third_guest_ddd, third_guest_cellphone, third_guest_email } = req.body;
     if (!booking_code || !hotel_id) {
       return res.status(400).json({ ok: false, error: 'booking_code e hotel_id são obrigatórios' });
+    }
+
+    if (!bill_id) {
+      return res.status(400).json({ ok: false, error: 'Pagamento não identificado. A reserva não foi confirmada.' });
+    }
+
+    const paymentCheck = await verifyVindiBillPaid(bill_id, session, { bookingCode: booking_code });
+    if (!paymentCheck.paid) {
+      console.warn('[LP BOOKING] Pagamento não verificado para confirmação. bill_id:', bill_id, 'code:', paymentCheck.code, 'status:', paymentCheck.status);
+      return res.status(402).json({ ok: false, error: paymentCheck.error, payment_status: paymentCheck.status || paymentCheck.code });
     }
 
     const vfbId = await getAssociateNic(BOOKING_CNPJ);
@@ -4018,7 +4028,7 @@ app.post('/api/lp/bookings', async (req, res) => {
     const session = getLpSession(lpToken);
     if (!session) return res.status(401).json({ ok: false, error: 'Sessão expirada' });
 
-    let { hotel_id, hotel_name, hotel_city, hotel_state, hotel_image, apartment_type, apartment_description, booking_code, localizador, check_in, check_out, adults, children, total_price, metadata } = req.body;
+    let { hotel_id, hotel_name, hotel_city, hotel_state, hotel_image, apartment_type, apartment_description, booking_code, localizador, check_in, check_out, adults, children, total_price, metadata, bill_id } = req.body;
 
     if (hotel_city && typeof hotel_city === 'object') {
       hotel_city = hotel_city.name || JSON.stringify(hotel_city);
@@ -4033,10 +4043,31 @@ app.post('/api/lp/bookings', async (req, res) => {
       return res.json({ ok: true, data: existing.rows[0], message: 'Reserva já registrada' });
     }
 
+    if (!bill_id) {
+      return res.status(400).json({ ok: false, error: 'Pagamento não identificado. A reserva não foi confirmada.' });
+    }
+
+    const paymentCheck = await verifyVindiBillPaid(bill_id, session, { bookingCode: booking_code, localizador });
+    if (!paymentCheck.paid) {
+      console.warn('[LP BOOKINGS] Pagamento não verificado ao gravar reserva. bill_id:', bill_id, 'code:', paymentCheck.code, 'status:', paymentCheck.status);
+      return res.status(402).json({ ok: false, error: paymentCheck.error, payment_status: paymentCheck.status || paymentCheck.code });
+    }
+
+    // Vincula a reserva ao pagamento (bill) já verificado, fechando o vínculo
+    // imediatamente (sem depender da chamada separada de link-payment).
+    let linkedPaymentId = null;
+    try {
+      const payRow = await query('SELECT id FROM payments WHERE vindi_bill_id = $1 LIMIT 1', [String(bill_id)]);
+      if (payRow.rows.length > 0) {
+        linkedPaymentId = payRow.rows[0].id;
+        await query('UPDATE payments SET booking_locator = $1 WHERE vindi_bill_id = $2', [localizador, String(bill_id)]);
+      }
+    } catch (e) { console.error('[LP BOOKINGS] link payment lookup failed:', e.message); }
+
     const result = await query(
-      `INSERT INTO bookings (user_id, hotel_id, hotel_name, hotel_city, hotel_state, hotel_image, apartment_type, apartment_description, booking_code, localizador, check_in, check_out, adults, children, total_price, status, metadata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
-      [session.userId, hotel_id || null, hotel_name || null, hotel_city || null, hotel_state || null, hotel_image || null, apartment_type || null, apartment_description || null, booking_code || null, localizador, check_in || null, check_out || null, adults || 1, children || 0, total_price || 0, 'confirmed', metadata ? JSON.stringify(metadata) : '{}']
+      `INSERT INTO bookings (user_id, hotel_id, hotel_name, hotel_city, hotel_state, hotel_image, apartment_type, apartment_description, booking_code, localizador, check_in, check_out, adults, children, total_price, status, payment_id, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+      [session.userId, hotel_id || null, hotel_name || null, hotel_city || null, hotel_state || null, hotel_image || null, apartment_type || null, apartment_description || null, booking_code || null, localizador, check_in || null, check_out || null, adults || 1, children || 0, total_price || 0, 'confirmed', linkedPaymentId, metadata ? JSON.stringify(metadata) : '{}']
     );
 
     console.log('[LP BOOKINGS] Created booking:', localizador, 'user:', session.userId);
@@ -4411,6 +4442,184 @@ function vindiRequest(method, endpoint, body = null) {
   });
 }
 
+// Preço autoritativo (server-side) do apartamento da reserva. Reproduz a mesma
+// fórmula de tarifa do /api/lp/hotels (categoria do hotel + temporada) sobre o
+// custo retornado pela Coobmais (InfoApartment) para a MESMA combinação
+// hotel_id + booking_code + datas + hóspedes. É a fonte da verdade do valor a
+// cobrar — o cliente não pode forjar um valor menor no create-bill.
+// Retorna o total (number) ou null quando não dá para determinar com segurança.
+async function computeAuthoritativeApartmentTotal({ hotel_id, booking_code, start_date, end_date, adults, children }) {
+  if (!hotel_id || !booking_code || !start_date || !end_date) return null;
+
+  // Coobmais InfoApartment espera dd/MM/yyyy. Aceitamos dd/MM/yyyy ou yyyy-MM-dd
+  // do cliente e normalizamos para o formato que a Coobmais entende.
+  const parseFlexibleDate = (s) => {
+    if (!s) return null;
+    const str = String(s);
+    if (str.includes('/')) { const [d, m, y] = str.split('/').map(Number); return new Date(y, m - 1, d); }
+    if (str.includes('-')) { const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d); }
+    const dt = new Date(str); return isNaN(dt) ? null : dt;
+  };
+  const toDDMMYYYY = (dt) => `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+
+  const ci = parseFlexibleDate(start_date);
+  const co = parseFlexibleDate(end_date);
+  if (!ci || !co || isNaN(ci) || isNaN(co)) return null;
+
+  let probe;
+  try {
+    probe = await probeInfoApartment({ hotel_id, start_date: toDDMMYYYY(ci), end_date: toDDMMYYYY(co), adults, children });
+  } catch (e) {
+    console.error('[VINDI] computeAuthoritativeApartmentTotal probe error:', e.message);
+    return null;
+  }
+  const apt = (probe.apartments || []).find(a => String(a.booking_code) === String(booking_code));
+  if (!apt) return null;
+
+  const nights = Math.max(0, Math.round((co - ci) / (1000 * 60 * 60 * 24)));
+
+  let cost = Array.isArray(apt.cost) ? apt.cost.map(c => ({ daily: c.daily || 0, extras: c.extras || 0 })) : [];
+
+  // Tarifa CRM por categoria/temporada (mesma lógica do /api/lp/hotels)
+  try {
+    const category = await getHotelCategory(hotel_id);
+    if (category) {
+      const allRates = await query('SELECT * FROM category_rates');
+      if (allRates.rows.length > 0) {
+        const ratesByName = {};
+        const ratesById = {};
+        allRates.rows.forEach(r => {
+          ratesByName[r.category_name.toLowerCase()] = r;
+          ratesById[r.category_id] = r;
+        });
+        const isNum = !isNaN(category);
+        const rate = isNum ? ratesById[category] : ratesByName[String(category).toLowerCase()];
+        if (rate) {
+          let highSeasonMonths = [1, 2, 7, 12];
+          try {
+            const seasonRow = await query('SELECT high_season_months FROM season_config WHERE id = 1');
+            if (seasonRow.rows.length > 0) highSeasonMonths = seasonRow.rows[0].high_season_months;
+          } catch {}
+          const checkInMonth = ci.getMonth() + 1;
+          const isHighSeason = highSeasonMonths.includes(checkInMonth);
+          const lowRate = parseFloat(rate.low_season_rate) || 0;
+          const highRate = parseFloat(rate.high_season_rate) || 0;
+          const appliedRate = isHighSeason ? (highRate || lowRate) : (lowRate || highRate);
+          if (appliedRate && appliedRate > 0) {
+            if (cost.length > 0) {
+              cost = cost.map(c => ({ daily: appliedRate, extras: c.extras }));
+            } else if (nights > 0) {
+              cost = Array.from({ length: nights }, () => ({ daily: appliedRate, extras: 0 }));
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[VINDI] computeAuthoritativeApartmentTotal rate error:', e.message);
+  }
+
+  const total = cost.reduce((sum, c) => sum + (c.daily || 0) + (c.extras || 0), 0);
+  return total > 0 ? total : null;
+}
+
+// Gate de verificação de pagamento: consulta a Vindi e só retorna paid:true
+// quando a cobrança está realmente paga (charge.status === 'paid'), o valor bate
+// com o valor autoritativo gravado para ESTA fatura, a fatura pertence ao usuário
+// da sessão, está vinculada exatamente ao booking_code da reserva sendo confirmada
+// e ainda não foi consumida por outra reserva (anti-replay).
+// Reutilizado por /api/lp/booking-confirmation e /api/lp/bookings para impedir
+// que uma reserva seja confirmada sem pagamento verificado no servidor.
+async function verifyVindiBillPaid(billId, session, opts = {}) {
+  const { bookingCode, localizador } = opts;
+
+  if (!billId) {
+    return { paid: false, code: 'missing', error: 'Pagamento não identificado. A reserva não foi confirmada.' };
+  }
+  if (!VINDI_API_KEY) {
+    return { paid: false, code: 'config', error: 'Não foi possível verificar o pagamento no momento. A reserva não foi confirmada.' };
+  }
+
+  const paymentRow = await query('SELECT guest_cpf, amount, metadata FROM payments WHERE vindi_bill_id = $1 LIMIT 1', [String(billId)]);
+  if (paymentRow.rows.length === 0) {
+    return { paid: false, code: 'not_found', error: 'Pagamento não encontrado para esta reserva. A reserva não foi confirmada.' };
+  }
+
+  if (session) {
+    const userRow = await query('SELECT cpf FROM users WHERE id = $1 LIMIT 1', [session.userId]);
+    const userCpf = (userRow.rows[0]?.cpf || '').replace(/\D/g, '');
+    const billCpf = (paymentRow.rows[0]?.guest_cpf || '').replace(/\D/g, '');
+    if (!userCpf || !billCpf || userCpf !== billCpf) {
+      return { paid: false, code: 'forbidden', error: 'Pagamento não pertence a este usuário. A reserva não foi confirmada.' };
+    }
+  }
+
+  // Binding fatura <-> reserva: a fatura precisa ter sido criada para o MESMO
+  // booking_code da reserva sendo confirmada. Impede usar uma fatura barata para
+  // confirmar uma reserva diferente/mais cara.
+  let payMeta = paymentRow.rows[0].metadata;
+  if (typeof payMeta === 'string') { try { payMeta = JSON.parse(payMeta); } catch { payMeta = {}; } }
+  payMeta = payMeta || {};
+  const billBookingCode = payMeta.booking_code != null ? String(payMeta.booking_code) : '';
+  if (bookingCode) {
+    if (!billBookingCode) {
+      return { paid: false, code: 'unbound', error: 'Esta fatura não está vinculada a uma reserva válida. A reserva não foi confirmada.' };
+    }
+    if (billBookingCode !== String(bookingCode)) {
+      console.warn('[VINDI] Booking code mismatch for bill', billId, 'bill:', billBookingCode, 'requested:', bookingCode);
+      return { paid: false, code: 'booking_mismatch', error: 'O pagamento não corresponde a esta reserva. A reserva não foi confirmada.' };
+    }
+  }
+
+  // Anti-replay: a fatura não pode já estar vinculada a outra reserva gravada.
+  // Cobre os dois modos de vínculo: bookings.payment_id e booking_locator.
+  const consumed = await query(
+    `SELECT b.localizador FROM bookings b
+     JOIN payments p ON (b.payment_id = p.id OR (b.payment_id IS NULL AND b.localizador = p.booking_locator))
+     WHERE p.vindi_bill_id = $1 LIMIT 1`,
+    [String(billId)]
+  );
+  if (consumed.rows.length > 0) {
+    const consumedLoc = consumed.rows[0].localizador;
+    if (!localizador || String(consumedLoc) !== String(localizador)) {
+      console.warn('[VINDI] Bill already consumed by booking', consumedLoc, 'bill', billId);
+      return { paid: false, code: 'already_used', error: 'Este pagamento já foi utilizado em outra reserva. A reserva não foi confirmada.' };
+    }
+  }
+
+  const expectedAmount = parseFloat(paymentRow.rows[0].amount);
+
+  let result;
+  try {
+    result = await vindiRequest('GET', `/bills/${billId}`);
+  } catch (e) {
+    console.error('[VINDI] verifyVindiBillPaid request error:', e.message);
+    return { paid: false, code: 'vindi_error', error: 'Não foi possível verificar o pagamento na Vindi. A reserva não foi confirmada.' };
+  }
+  if (result.status !== 200) {
+    return { paid: false, code: 'vindi_error', error: 'Não foi possível verificar o pagamento na Vindi. A reserva não foi confirmada.' };
+  }
+
+  const bill = result.data.bill || result.data;
+  const charge = bill.charges?.[0] || {};
+  const chargeStatus = charge.status;
+  const paidAmount = parseFloat(charge.amount != null ? charge.amount : bill.amount);
+
+  // Exigir 'paid'; 'charge_underpaid' (pagamento a menor) e 'pending' NÃO contam como pago.
+  if (chargeStatus !== 'paid') {
+    return { paid: false, code: 'unpaid', status: chargeStatus, error: 'O pagamento ainda não foi confirmado. A reserva não foi confirmada e a fatura segue aguardando pagamento.' };
+  }
+
+  // O valor pago tem que bater com o valor autoritativo gravado para a fatura
+  // (que o create-bill calculou no servidor, não o que o cliente enviou).
+  if (Number.isFinite(expectedAmount) && Number.isFinite(paidAmount) && Math.abs(paidAmount - expectedAmount) > 0.01) {
+    console.warn('[VINDI] Amount mismatch for bill', billId, 'expected', expectedAmount, 'paid', paidAmount);
+    return { paid: false, code: 'amount_mismatch', status: chargeStatus, error: 'O valor pago não corresponde ao valor da reserva. A reserva não foi confirmada.' };
+  }
+
+  return { paid: true, status: chargeStatus, amount: paidAmount };
+}
+
 app.get('/api/vindi/payment-methods', async (req, res) => {
   try {
     if (!VINDI_API_KEY) {
@@ -4536,6 +4745,12 @@ app.post('/api/vindi/create-bill', async (req, res) => {
       booking_locator,
       hotel_name,
       customer_address,
+      hotel_id,
+      booking_code,
+      check_in,
+      check_out,
+      adults,
+      children,
     } = req.body;
 
     if (!payment_method_code || !customer_name || !customer_cpf || !amount) {
@@ -4546,6 +4761,35 @@ app.post('/api/vindi/create-bill', async (req, res) => {
       console.warn('[VINDI] Rejected invalid CPF for customer:', customer_name);
       return res.status(400).json({ ok: false, error: 'CPF inválido. Verifique seus dados de cadastro e tente novamente.' });
     }
+
+    if (payment_method_code === 'cartao_unyco' && !card_number) {
+      console.warn('[VINDI] Rejected cartao_unyco without card data for customer:', customer_name);
+      return res.status(400).json({ ok: false, error: 'Dados do cartão são obrigatórios para pagamento com cartão.' });
+    }
+
+    // Preço autoritativo (server-side): a reserva precisa identificar o
+    // apartamento (hotel_id + booking_code + datas) para que o servidor calcule
+    // o valor real a cobrar. Impede que o cliente forje um valor menor.
+    if (!hotel_id || !booking_code || !check_in || !check_out) {
+      return res.status(400).json({ ok: false, error: 'Não foi possível validar a reserva (dados do apartamento ausentes). Reinicie a reserva e tente novamente.' });
+    }
+
+    const authoritativeAmount = await computeAuthoritativeApartmentTotal({
+      hotel_id, booking_code, start_date: check_in, end_date: check_out, adults, children,
+    });
+    if (authoritativeAmount == null) {
+      console.warn('[VINDI] Could not compute authoritative amount for booking_code', booking_code, 'hotel', hotel_id);
+      return res.status(422).json({ ok: false, error: 'Não foi possível confirmar o preço da reserva no momento. A disponibilidade pode ter mudado — reinicie a reserva e tente novamente.' });
+    }
+
+    const clientAmount = parseFloat(amount);
+    if (!Number.isFinite(clientAmount) || Math.abs(clientAmount - authoritativeAmount) > 0.01) {
+      console.warn('[VINDI] Amount mismatch at create-bill. client:', clientAmount, 'authoritative:', authoritativeAmount, 'booking_code:', booking_code);
+      return res.status(422).json({ ok: false, error: 'O valor da reserva mudou. Reinicie a reserva para ver o preço atualizado.' });
+    }
+
+    // A partir daqui, cobramos sempre o valor autoritativo do servidor.
+    const chargeAmount = authoritativeAmount;
 
     console.log('[VINDI] Creating bill:', JSON.stringify({
       method: payment_method_code,
@@ -4562,14 +4806,14 @@ app.post('/api/vindi/create-bill', async (req, res) => {
       payment_method_code,
       bill_items: [{
         product_id: productId,
-        amount: parseFloat(amount),
+        amount: chargeAmount,
       }],
       installments: installments || 1,
-      metadata: {},
+      metadata: { booking_code: String(booking_code) },
     };
 
     if (booking_locator) {
-      billBody.metadata = { booking_locator, hotel_name };
+      billBody.metadata = { ...billBody.metadata, booking_locator, hotel_name };
     }
 
     if (payment_method_code === 'cartao_unyco' && card_number) {
@@ -4610,14 +4854,14 @@ app.post('/api/vindi/create-bill', async (req, res) => {
           customer_name,
           customer_cpf,
           customer_email || null,
-          amount,
+          chargeAmount,
           payment_method_code,
           bill.id || null,
           charge.id || null,
           customerId,
           ({'paid':'paid','charge_underpaid':'paid','pending':'pending','waiting':'pending','processing':'pending','canceled':'canceled','cancelled':'canceled','charge_canceled_dev':'canceled','review':'pending','attempted':'pending'}[charge.status || bill.status] || charge.status || bill.status || 'pending'),
           charge.print_url || null,
-          JSON.stringify({ vindi_response: { bill_id: bill.id, charge_id: charge.id, charge_status: charge.status } }),
+          JSON.stringify({ booking_code: String(booking_code), vindi_response: { bill_id: bill.id, charge_id: charge.id, charge_status: charge.status } }),
         ]
       );
 

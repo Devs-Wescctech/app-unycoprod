@@ -180,6 +180,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
   const [bookingLocator, setBookingLocator] = useState(null);
   const [reserving, setReserving] = useState(false);
   const [paymentCompleted, setPaymentCompleted] = useState(false);
+  const [confirmingBooking, setConfirmingBooking] = useState(false);
   const [error, setError] = useState('');
   const [expandedPolicy, setExpandedPolicy] = useState(false);
   const [alternativesModalOpen, setAlternativesModalOpen] = useState(false);
@@ -352,12 +353,19 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
   const handlePaymentSuccess = async (paymentResult) => {
     setError('');
     setStep(4);
-    setPaymentCompleted(true);
+    setConfirmingBooking(true);
 
+    const billId = paymentResult?.bill_id || null;
     let localizador = bookingLocator;
 
-    if (!localizador) {
-      try {
+    if (!billId) {
+      setConfirmingBooking(false);
+      setError('Não foi possível verificar o pagamento. A reserva não foi confirmada.');
+      return;
+    }
+
+    try {
+      if (!localizador) {
         const cleanPhoneConf = (user?.phone || '').replace(/\D/g, '');
         const confirmRes = await fetch('/api/lp/booking-confirmation', {
           method: 'POST',
@@ -366,6 +374,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
           body: JSON.stringify({
             booking_code: selectedApartment.booking_code,
             hotel_id: hotel.id,
+            bill_id: billId,
             third_guest_name: user?.name || '',
             third_guest_cpf: (user?.cpf || '').replace(/\D/g, ''),
             third_guest_ddd: cleanPhoneConf.substring(0, 2),
@@ -379,16 +388,13 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
           setBookingLocator(localizador);
         } else {
           console.error('Falha ao confirmar reserva na Coobmais após pagamento:', confirmData);
-          setError('Pagamento aprovado, mas não foi possível confirmar a reserva automaticamente. Entre em contato com o suporte informando seu pagamento.');
+          setConfirmingBooking(false);
+          setError(confirmData.error || confirmData.data?.mensagem || 'Não foi possível confirmar a reserva. O pagamento não foi confirmado.');
+          return;
         }
-      } catch (e) {
-        console.error('Erro ao confirmar reserva na Coobmais:', e);
-        setError('Pagamento aprovado, mas ocorreu um erro ao confirmar a reserva. Entre em contato com o suporte.');
       }
-    }
 
-    try {
-      await fetch('/api/lp/bookings', {
+      const saveRes = await fetch('/api/lp/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -402,33 +408,44 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
           apartment_description: selectedApartment.accommodation_description || '',
           booking_code: selectedApartment.booking_code,
           localizador: localizador,
+          bill_id: billId,
           check_in: (effectiveDates?.checkIn || searchParams?.checkIn) ? format(effectiveDates?.checkIn || searchParams.checkIn, 'yyyy-MM-dd') : null,
           check_out: (effectiveDates?.checkOut || searchParams?.checkOut) ? format(effectiveDates?.checkOut || searchParams.checkOut, 'yyyy-MM-dd') : null,
           adults: searchParams?.adults || 1,
           children: searchParams?.children || 0,
           total_price: selectedApartment.total_price || 0,
           metadata: JSON.stringify({
-            payment_bill_id: paymentResult?.bill_id || null,
+            payment_bill_id: billId,
             payment_status: paymentResult?.charge_status || null,
             payment_amount: paymentResult?.amount || null,
           }),
         }),
       });
-    } catch (e) {
-      console.error('Erro ao salvar reserva:', e);
-    }
+      const saveData = await saveRes.json();
+      if (!saveData.ok) {
+        console.error('Falha ao registrar reserva após pagamento:', saveData);
+        setConfirmingBooking(false);
+        setError(saveData.error || 'Não foi possível registrar a reserva. O pagamento não foi confirmado.');
+        return;
+      }
 
-    if (paymentResult?.bill_id) {
       try {
         await fetch(`/api/lp/bookings/${localizador}/link-payment`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ bill_id: paymentResult.bill_id }),
+          body: JSON.stringify({ bill_id: billId }),
         });
       } catch (e) {
         console.error('Erro ao vincular pagamento:', e);
       }
+
+      setPaymentCompleted(true);
+    } catch (e) {
+      console.error('Erro ao confirmar reserva:', e);
+      setError('Ocorreu um erro ao confirmar a reserva. Entre em contato com o suporte informando seu pagamento.');
+    } finally {
+      setConfirmingBooking(false);
     }
   };
 
@@ -540,6 +557,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
                 bookingResult={bookingResult}
                 bookingLocator={bookingLocator}
                 paymentCompleted={paymentCompleted}
+                confirming={confirmingBooking}
                 error={error}
                 onClose={handleClose}
               />
@@ -1030,7 +1048,20 @@ function InfoItem({ label, value, highlight }) {
   );
 }
 
-function StepResult({ apartment, hotel, searchParams, bookingResult, bookingLocator, paymentCompleted, error, onClose }) {
+function StepResult({ apartment, hotel, searchParams, bookingResult, bookingLocator, paymentCompleted, confirming, error, onClose }) {
+  if (confirming && !error && !paymentCompleted) {
+    return (
+      <div className="text-center py-10" style={{ animation: 'fadeSlideIn 0.5s ease-out' }}>
+        <div className="relative mx-auto mb-5 w-16 h-16">
+          <div className="absolute inset-0 rounded-full border-4 border-blue-100" />
+          <div className="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin" />
+        </div>
+        <h3 className="text-base font-bold text-gray-800 mb-1">Confirmando sua reserva…</h3>
+        <p className="text-xs text-gray-500 max-w-sm mx-auto leading-relaxed">Estamos verificando o pagamento e confirmando a hospedagem. Não feche esta janela.</p>
+      </div>
+    );
+  }
+
   if (paymentCompleted && bookingLocator && !error) {
     return (
       <div className="text-center py-6" style={{ animation: 'fadeSlideIn 0.5s ease-out' }}>
