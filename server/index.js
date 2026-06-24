@@ -52,6 +52,20 @@ LP_HTML_FILES.forEach(file => {
 });
 
 app.use('/lp', express.static(path.join(__dirname, '../public/lp'), { index: false }));
+
+// Download público de documentos (ex.: fluxo de reserva)
+app.get('/docs/fluxo-reserva-coobmais.md', (req, res) => {
+  const candidates = [
+    path.join(__dirname, '../public/docs/fluxo-reserva-coobmais.md'),
+    path.join(__dirname, '../docs/fluxo-reserva-coobmais.md'),
+  ];
+  const filePath = candidates.find(p => fs.existsSync(p));
+  if (!filePath) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="fluxo-reserva-coobmais.md"');
+  res.setHeader('Cache-Control', 'no-store');
+  fs.createReadStream(filePath).pipe(res);
+});
 // Serve hero video with explicit range-request streaming (bypasses CDN caching issues)
 const VIDEO_CANDIDATES = [
   path.join(__dirname, '../dist/hero-video.mp4'),
@@ -2605,10 +2619,9 @@ app.post('/api/lp/hotels', async (req, res) => {
       );
 
       const filtered = probeResults
-        .filter(r => r.hasImediata || r.hotel?.by_request === true)
+        .filter(r => r.hasImediata)
         .map(r => r.hotel);
-      const byRequestKept = filtered.filter(h => h?.by_request === true && !probeResults.find(r => r.hotel === h)?.hasImediata).length;
-      console.log(`[LP HOTELS] InfoApartment: ${filtered.length}/${accommodations.length} hotéis retornados (${byRequestKept} sob consulta sem imediata)`);
+      console.log(`[LP HOTELS] InfoApartment: ${filtered.length}/${accommodations.length} hotéis com disponibilidade imediata`);
       return res.json({ ok: true, data: filtered });
     }
 
