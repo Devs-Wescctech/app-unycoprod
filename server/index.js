@@ -2477,6 +2477,117 @@ async function fetchHotelsFromCoobmais({ cidade, uf, google_place_id, checkIn, c
   return Array.isArray(acc) ? acc : [];
 }
 
+// Enriquece a lista de acomodações da Coobmais com a categoria do CRM e a tarifa
+// de alta/baixa temporada (season_config + category_rates), resolve a imagem
+// principal e filtra mantendo apenas hotéis com disponibilidade imediata
+// (InfoApartment). É a fonte única dessa regra — usada pela LP (/api/lp/hotels) e
+// pela API pública (/api/hotels/search) para manter as duas saídas em lockstep.
+async function enrichAndFilterHotels(accommodations, { checkIn, checkOut, adults, children }) {
+  if (!Array.isArray(accommodations) || accommodations.length === 0) return [];
+
+  const childrenCount = typeof children === 'number'
+    ? children
+    : (Array.isArray(children) ? children.length : parseInt(children) || 0);
+
+  let highSeasonMonths = [1, 2, 7, 12];
+  try {
+    const seasonRow = await query('SELECT high_season_months FROM season_config WHERE id = 1');
+    if (seasonRow.rows.length > 0) highSeasonMonths = seasonRow.rows[0].high_season_months;
+  } catch {}
+
+  const allRates = await query('SELECT * FROM category_rates');
+  const ratesByName = {};
+  const ratesById = {};
+  allRates.rows.forEach(r => {
+    ratesByName[r.category_name.toLowerCase()] = r;
+    ratesById[r.category_id] = r;
+  });
+
+  const hasAnyRates = allRates.rows.length > 0;
+
+  if (hasAnyRates && checkIn && accommodations.length > 0) {
+    const parts = checkIn.split('-');
+    const checkInMonth = parts.length >= 2 ? parseInt(parts[1], 10) : new Date(checkIn).getMonth() + 1;
+    const isHighSeason = highSeasonMonths.includes(checkInMonth);
+
+    let nights = 0;
+    if (checkOut) {
+      const ci = new Date(checkIn);
+      const co = new Date(checkOut);
+      if (!isNaN(ci) && !isNaN(co)) {
+        nights = Math.max(0, Math.round((co - ci) / (1000 * 60 * 60 * 24)));
+      }
+    }
+
+    const categoryPromises = accommodations.map(h => getHotelCategory(h.id));
+    const categories = await Promise.allSettled(categoryPromises);
+
+    for (let i = 0; i < accommodations.length; i++) {
+      const catResult = categories[i];
+      const categoryRaw = catResult.status === 'fulfilled' ? catResult.value : null;
+      if (!categoryRaw) continue;
+
+      const isNum = !isNaN(categoryRaw);
+      const rate = isNum ? ratesById[categoryRaw] : ratesByName[categoryRaw.toLowerCase()];
+      if (!rate) continue;
+
+      const lowRate = parseFloat(rate.low_season_rate) || 0;
+      const highRate = parseFloat(rate.high_season_rate) || 0;
+      const appliedRate = isHighSeason ? (highRate || lowRate) : (lowRate || highRate);
+
+      const h = accommodations[i];
+      h.category_name = rate.category_name;
+      h.category_low_rate = lowRate;
+      h.category_high_rate = highRate;
+      h.high_season_months = highSeasonMonths;
+      h.season_label = isHighSeason ? 'Alta' : 'Baixa';
+
+      if (appliedRate && appliedRate > 0) {
+        h.original_total_price = h.total_price;
+        if (Array.isArray(h.cost) && h.cost.length > 0) {
+          h.cost = h.cost.map(c => ({ ...c, original_daily: c.daily, daily: appliedRate }));
+        } else if (nights > 0) {
+          h.cost = Array.from({ length: nights }, () => ({ daily: appliedRate, extras: 0 }));
+          h.daily_count = h.daily_count || nights;
+        } else {
+          h.cost = h.cost || [];
+        }
+        h.total_price = h.cost.reduce((sum, c) => sum + (c.daily || 0) + (c.extras || 0), 0);
+      }
+    }
+
+    console.log('[HOTELS] Applied category rates to', accommodations.filter(h => h.category_name).length, 'hotels');
+  }
+
+  await resolveAccommodationImages(accommodations);
+
+  if (checkIn && checkOut && accommodations.length > 0) {
+    const adultsNum = Math.max(2, parseInt(adults) || 2);
+    const probeResults = await Promise.all(
+      accommodations.map(h =>
+        probeInfoApartment({ hotel_id: h.id, start_date: checkIn, end_date: checkOut, adults: adultsNum, children: childrenCount })
+          .then(r => ({ hotel: h, hasImediata: r.apartments.length > 0 }))
+          .catch(() => ({ hotel: h, hasImediata: false }))
+      )
+    );
+    return probeResults.filter(r => r.hasImediata).map(r => r.hotel);
+  }
+
+  return accommodations;
+}
+
+// Converte uma data no formato DD-MM-YYYY (ex.: "12-12-2026") para o formato
+// interno YYYY-MM-DD usado pela lógica de busca. Retorna null se inválida.
+function ddmmyyyyToISO(s) {
+  const m = String(s || '').trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!m) return null;
+  const [, dd, mm, yyyy] = m;
+  const day = parseInt(dd, 10);
+  const month = parseInt(mm, 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 app.post('/api/lp/hotels', async (req, res) => {
   try {
     const { uf, checkIn, checkOut, adults, children, rooms, google_place_id, cidade_id, destination } = req.body;
@@ -2534,101 +2645,84 @@ app.post('/api/lp/hotels', async (req, res) => {
       return res.json({ ok: true, data: [] });
     }
 
-    let highSeasonMonths = [1, 2, 7, 12];
-    try {
-      const seasonRow = await query('SELECT high_season_months FROM season_config WHERE id = 1');
-      if (seasonRow.rows.length > 0) highSeasonMonths = seasonRow.rows[0].high_season_months;
-    } catch {}
-
-    const allRates = await query('SELECT * FROM category_rates');
-    const ratesByName = {};
-    const ratesById = {};
-    allRates.rows.forEach(r => {
-      ratesByName[r.category_name.toLowerCase()] = r;
-      ratesById[r.category_id] = r;
-    });
-
-    const hasAnyRates = allRates.rows.length > 0;
-
-    if (hasAnyRates && checkIn && accommodations.length > 0) {
-      const parts = checkIn.split('-');
-      const checkInMonth = parts.length >= 2 ? parseInt(parts[1], 10) : new Date(checkIn).getMonth() + 1;
-      const isHighSeason = highSeasonMonths.includes(checkInMonth);
-
-      let nights = 0;
-      if (checkOut) {
-        const ci = new Date(checkIn);
-        const co = new Date(checkOut);
-        if (!isNaN(ci) && !isNaN(co)) {
-          nights = Math.max(0, Math.round((co - ci) / (1000 * 60 * 60 * 24)));
-        }
-      }
-
-      const categoryPromises = accommodations.map(h => getHotelCategory(h.id));
-      const categories = await Promise.allSettled(categoryPromises);
-
-      for (let i = 0; i < accommodations.length; i++) {
-        const catResult = categories[i];
-        const categoryRaw = catResult.status === 'fulfilled' ? catResult.value : null;
-        if (!categoryRaw) continue;
-
-        const isNum = !isNaN(categoryRaw);
-        const rate = isNum ? ratesById[categoryRaw] : ratesByName[categoryRaw.toLowerCase()];
-        if (!rate) continue;
-
-        const lowRate = parseFloat(rate.low_season_rate) || 0;
-        const highRate = parseFloat(rate.high_season_rate) || 0;
-        const appliedRate = isHighSeason ? (highRate || lowRate) : (lowRate || highRate);
-
-        const h = accommodations[i];
-        h.category_name = rate.category_name;
-        h.category_low_rate = lowRate;
-        h.category_high_rate = highRate;
-        h.high_season_months = highSeasonMonths;
-        h.season_label = isHighSeason ? 'Alta' : 'Baixa';
-
-        if (appliedRate && appliedRate > 0) {
-          h.original_total_price = h.total_price;
-          if (Array.isArray(h.cost) && h.cost.length > 0) {
-            h.cost = h.cost.map(c => ({ ...c, original_daily: c.daily, daily: appliedRate }));
-          } else if (nights > 0) {
-            h.cost = Array.from({ length: nights }, () => ({ daily: appliedRate, extras: 0 }));
-            h.daily_count = h.daily_count || nights;
-          } else {
-            h.cost = h.cost || [];
-          }
-          h.total_price = h.cost.reduce((sum, c) => sum + (c.daily || 0) + (c.extras || 0), 0);
-        }
-      }
-
-      console.log('[LP HOTELS] Applied category rates to', accommodations.filter(h => h.category_name).length, 'hotels');
-    }
-
-    await resolveAccommodationImages(accommodations);
-
-    if (checkIn && checkOut && accommodations.length > 0) {
-      const adultsNum = Math.max(2, parseInt(adults) || 2);
-      console.log(`[LP HOTELS] Verificando InfoApartment para ${accommodations.length} hotéis (datas: ${checkIn} → ${checkOut})...`);
-
-      const probeResults = await Promise.all(
-        accommodations.map(h =>
-          probeInfoApartment({ hotel_id: h.id, start_date: checkIn, end_date: checkOut, adults: adultsNum, children: childrenCount })
-            .then(r => ({ hotel: h, hasImediata: r.apartments.length > 0 }))
-            .catch(() => ({ hotel: h, hasImediata: false }))
-        )
-      );
-
-      const filtered = probeResults
-        .filter(r => r.hasImediata)
-        .map(r => r.hotel);
-      console.log(`[LP HOTELS] InfoApartment: ${filtered.length}/${accommodations.length} hotéis com disponibilidade imediata`);
-      return res.json({ ok: true, data: filtered });
-    }
-
-    res.json({ ok: true, data: accommodations });
+    const filtered = await enrichAndFilterHotels(accommodations, { checkIn, checkOut, adults, children });
+    console.log(`[LP HOTELS] InfoApartment: ${filtered.length}/${accommodations.length} hotéis com disponibilidade imediata`);
+    res.json({ ok: true, data: filtered });
   } catch (error) {
     console.error('[LP HOTELS] Error:', error.message);
     res.status(500).json({ ok: false, error: 'Erro ao buscar hotéis', detail: error.message });
+  }
+});
+
+// API pública (sem autenticação) de busca de hotéis. Recebe destino + datas no
+// formato DD-MM-YYYY e devolve a lista enriquecida com a categoria e a tarifa do
+// CRM (alta/baixa temporada), apenas com disponibilidade imediata. Reaproveita a
+// mesma lógica da LP via enrichAndFilterHotels para manter as saídas em lockstep.
+app.post('/api/hotels/search', async (req, res) => {
+  try {
+    const { destination, checkIn, checkOut, adults, children } = req.body || {};
+
+    const cidade = typeof destination === 'string' ? destination.trim() : '';
+    if (!cidade) {
+      return res.status(400).json({ ok: false, error: 'Informe o destino (destination) para buscar hospedagens.' });
+    }
+
+    const ci = ddmmyyyyToISO(checkIn);
+    const co = ddmmyyyyToISO(checkOut);
+    if (!ci || !co) {
+      return res.status(400).json({ ok: false, error: 'Informe checkIn e checkOut no formato DD-MM-YYYY (ex.: "12-12-2026").' });
+    }
+
+    const adultsCount = Math.max(2, parseInt(adults) || 2);
+    const childrenCount = typeof children === 'number'
+      ? children
+      : (Array.isArray(children) ? children.length : parseInt(children) || 0);
+
+    console.log(`[HOTELS SEARCH] destination="${cidade}" ${ci} → ${co} adults=${adultsCount} children=${childrenCount}`);
+
+    let accommodations = [];
+    try {
+      const coobHotels = await fetchHotelsFromCoobmais({
+        cidade, checkIn: ci, checkOut: co, adults: adultsCount, children: childrenCount,
+      });
+      if (coobHotels === null) {
+        return res.status(404).json({ ok: false, error: `Não encontramos a cidade "${cidade}". Verifique a escrita e tente novamente.` });
+      }
+      accommodations = Array.isArray(coobHotels) ? coobHotels : [];
+    } catch (coobErr) {
+      console.error('[HOTELS SEARCH] Coobmais GetHotels falhou:', coobErr.message);
+      return res.status(502).json({ ok: false, error: 'Não foi possível buscar hospedagens no momento. Tente novamente em instantes.' });
+    }
+
+    if (accommodations.length === 0) {
+      return res.json({ ok: true, data: [] });
+    }
+
+    const enriched = await enrichAndFilterHotels(accommodations, {
+      checkIn: ci, checkOut: co, adults: adultsCount, children: childrenCount,
+    });
+
+    const nights = Math.max(0, Math.round((new Date(co) - new Date(ci)) / (1000 * 60 * 60 * 24)));
+
+    const data = enriched.map(h => {
+      const pricePerNight = (Array.isArray(h.cost) && h.cost.length > 0 && h.cost[0].daily)
+        ? h.cost[0].daily
+        : (nights > 0 ? (h.total_price || 0) / nights : (h.total_price || 0));
+      return {
+        name: (h.name || h.hotelName || '').replace(/\s+/g, ' ').trim(),
+        Category: h.category_name || null,
+        image: h.image || '',
+        pricePerNight: Math.round(pricePerNight * 100) / 100,
+        totalPrice: Math.round((h.total_price || 0) * 100) / 100,
+        nights,
+        season: h.season_label || null,
+      };
+    });
+
+    return res.json({ ok: true, data });
+  } catch (error) {
+    console.error('[HOTELS SEARCH] Error:', error.message);
+    return res.status(500).json({ ok: false, error: 'Erro ao buscar hotéis', detail: error.message });
   }
 });
 
