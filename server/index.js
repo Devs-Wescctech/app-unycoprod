@@ -2737,7 +2737,6 @@ app.post('/api/hotels/search', async (req, res) => {
         total_price: Math.round((h.total_price || 0) * 100) / 100,
         daily_count: h.daily_count || nights,
         is_preferential: !!h.is_preferential,
-        by_request: !!h.by_request,
         pricePerNight: Math.round(pricePerNight * 100) / 100,
         totalPrice: Math.round((h.total_price || 0) * 100) / 100,
         nights,
