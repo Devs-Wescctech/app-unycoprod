@@ -2680,14 +2680,31 @@ app.post('/api/hotels/search', async (req, res) => {
 
     console.log(`[HOTELS SEARCH] destination="${cidade}" ${ci} → ${co} adults=${adultsCount} children=${childrenCount}`);
 
+    // Resolve o google_place_id (ID da cidade) antes da busca para devolvê-lo na resposta
+    let placeId = null;
+    try {
+      const cr = await fetch(`${COOBMAIS_BASE_URL}/Book/GetCities`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await ensureCoobToken()}` },
+        body: JSON.stringify({ cidade }),
+      });
+      if (cr.ok) {
+        const list = await cr.json();
+        if (Array.isArray(list) && list.length > 0) placeId = list[0].google_place_id;
+      }
+    } catch (cityErr) {
+      console.error('[HOTELS SEARCH] Coobmais GetCities falhou:', cityErr.message);
+      return res.status(502).json({ ok: false, error: 'Não foi possível buscar hospedagens no momento. Tente novamente em instantes.' });
+    }
+    if (!placeId) {
+      return res.status(404).json({ ok: false, error: `Não encontramos a cidade "${cidade}". Verifique a escrita e tente novamente.` });
+    }
+
     let accommodations = [];
     try {
       const coobHotels = await fetchHotelsFromCoobmais({
-        cidade, checkIn: ci, checkOut: co, adults: adultsCount, children: childrenCount,
+        cidade, google_place_id: placeId, checkIn: ci, checkOut: co, adults: adultsCount, children: childrenCount,
       });
-      if (coobHotels === null) {
-        return res.status(404).json({ ok: false, error: `Não encontramos a cidade "${cidade}". Verifique a escrita e tente novamente.` });
-      }
       accommodations = Array.isArray(coobHotels) ? coobHotels : [];
     } catch (coobErr) {
       console.error('[HOTELS SEARCH] Coobmais GetHotels falhou:', coobErr.message);
@@ -2709,8 +2726,11 @@ app.post('/api/hotels/search', async (req, res) => {
         ? h.cost[0].daily
         : (nights > 0 ? (h.total_price || 0) / nights : (h.total_price || 0));
       return {
+        id: h.id || null,
         name: (h.name || h.hotelName || '').replace(/\s+/g, ' ').trim(),
         Category: h.category_name || null,
+        city: cidade,
+        googlePlaceId: placeId,
         image: h.image || '',
         pricePerNight: Math.round(pricePerNight * 100) / 100,
         totalPrice: Math.round((h.total_price || 0) * 100) / 100,
