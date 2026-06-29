@@ -3862,42 +3862,10 @@ app.post('/api/lp/availability-book', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'booking_code e hotel_id são obrigatórios' });
     }
 
-    const vfbId = await getAssociateNic(BOOKING_CNPJ);
-    console.log('[LP AVAILABILITY] booking_code:', booking_code, 'hotel_id:', hotel_id, 'cnpj:', BOOKING_CNPJ.substring(0, 4) + '***', 'vfb:', vfbId || 'NULL');
-
-    if (!vfbId) {
-      console.log('[LP AVAILABILITY] Associate not found for CNPJ, cannot proceed');
-      return res.json({ ok: false, data: { sucesso: 0, mensagem: 'O cadastro institucional não está vinculado ao sistema de reservas. Entre em contato com o suporte.' } });
-    }
-
-    const response = await fetch(`${COOBMAIS_BASE_URL}/Book/AvailabilityBook`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await ensureCoobToken()}`
-      },
-      body: JSON.stringify({
-        token: booking_code,
-        cpf: BOOKING_CNPJ,
-        hotel_id: parseInt(hotel_id),
-        vfb_points: 0,
-        vfb_identifier: vfbId,
-        third_guest_name: third_guest_name || '',
-        third_guest_cpf: (third_guest_cpf || '').replace(/\D/g, ''),
-        third_guest_ddd: third_guest_ddd || '',
-        third_guest_cellphone: third_guest_cellphone || '',
-        third_guest_email: third_guest_email || ''
-      })
+    const result = await performCoobmaisBookAction('AvailabilityBook', {
+      booking_code, hotel_id, third_guest_name, third_guest_cpf, third_guest_ddd, third_guest_cellphone, third_guest_email
     });
-
-    const rawText = await response.text();
-    console.log('[LP AVAILABILITY] Status:', response.status, 'Body:', rawText.substring(0, 500));
-    let data;
-    try { data = JSON.parse(rawText); } catch { data = { sucesso: 0, mensagem: rawText || 'Resposta inválida' }; }
-    if (Array.isArray(data)) data = data[0] || { sucesso: 0, mensagem: 'Resposta vazia' };
-    const isSuccess = data.sucesso === 1 || data.sucesso === '1' || data.situacao === 1 || data.situacao === '1';
-    if (data.mensagem) data.mensagem = translateBookingError(data.mensagem);
-    res.json({ ok: isSuccess, data });
+    res.json({ ok: result.ok, data: result.data });
   } catch (error) {
     console.error('[LP AVAILABILITY] Error:', error.message);
     res.status(500).json({ ok: false, error: 'Erro ao verificar disponibilidade', detail: error.message });
@@ -3919,50 +3887,41 @@ app.post('/api/lp/booking-confirmation', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Pagamento não identificado. A reserva não foi confirmada.' });
     }
 
+    // Mesma trava de pagamento que já protege a confirmação (dono/CPF,
+    // binding fatura↔booking_code, anti-replay, status paid, valor).
     const paymentCheck = await verifyVindiBillPaid(bill_id, session, { bookingCode: booking_code });
     if (!paymentCheck.paid) {
       console.warn('[LP BOOKING] Pagamento não verificado para confirmação. bill_id:', bill_id, 'code:', paymentCheck.code, 'status:', paymentCheck.status);
       return res.status(402).json({ ok: false, error: paymentCheck.error, payment_status: paymentCheck.status || paymentCheck.code });
     }
 
-    const vfbId = await getAssociateNic(BOOKING_CNPJ);
-    console.log('[LP BOOKING] Confirming:', booking_code, 'hotel_id:', hotel_id, 'cnpj:', BOOKING_CNPJ.substring(0, 4) + '***', 'vfb:', vfbId || 'NULL');
+    const guestBody = { booking_code, hotel_id, third_guest_name, third_guest_cpf, third_guest_ddd, third_guest_cellphone, third_guest_email };
 
-    if (!vfbId) {
-      return res.json({ ok: false, data: { sucesso: 0, mensagem: 'O cadastro institucional não está vinculado ao sistema de reservas. Entre em contato com o suporte.' } });
+    // Helper: indisponível após pagamento → estorna a fatura e responde com erro
+    // claro, sem gravar a reserva.
+    const refundAndRespond = async (failData, reason) => {
+      const refund = await refundVindiBill(bill_id, reason);
+      const baseMsg = failData?.mensagem || 'O quarto deixou de estar disponível.';
+      const msg = refund.refunded
+        ? `${baseMsg} Seu pagamento será estornado integralmente.`
+        : `${baseMsg} Não conseguimos estornar automaticamente — entre em contato com o suporte informando seu pagamento.`;
+      console.warn('[LP BOOKING] Indisponível após pagamento. bill_id:', bill_id, 'reason:', reason, 'refunded:', refund.refunded);
+      return res.status(409).json({ ok: false, error: msg, unavailable: true, refunded: refund.refunded });
+    };
+
+    // 1. AvailabilityBook (agora DEPOIS do pagamento confirmado).
+    const avail = await performCoobmaisBookAction('AvailabilityBook', guestBody);
+    if (!avail.ok) {
+      return refundAndRespond(avail.data, 'availability_failed');
     }
 
-    const response = await fetch(`${COOBMAIS_BASE_URL}/Book/BookingConfirmation`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await ensureCoobToken()}`
-      },
-      body: JSON.stringify({
-        token: booking_code,
-        cpf: BOOKING_CNPJ,
-        hotel_id: parseInt(hotel_id),
-        vfb_points: 0,
-        vfb_identifier: vfbId,
-        third_guest_name: third_guest_name || '',
-        third_guest_cpf: (third_guest_cpf || '').replace(/\D/g, ''),
-        third_guest_ddd: third_guest_ddd || '',
-        third_guest_cellphone: third_guest_cellphone || '',
-        third_guest_email: third_guest_email || ''
-      })
-    });
+    // 2. BookingConfirmation.
+    const confirm = await performCoobmaisBookAction('BookingConfirmation', guestBody);
+    if (!confirm.ok) {
+      return refundAndRespond(confirm.data, 'confirmation_failed');
+    }
 
-    const rawText = await response.text();
-    console.log('[LP BOOKING] Status:', response.status, 'Body:', rawText.substring(0, 500));
-    let data;
-    try { data = JSON.parse(rawText); } catch { data = { sucesso: 0, mensagem: rawText || 'Resposta inválida' }; }
-    if (Array.isArray(data)) data = data[0] || { sucesso: 0, mensagem: 'Resposta vazia' };
-    const isSuccess = data.sucesso === 1 || data.sucesso === '1' || data.situacao === 1 || data.situacao === '1';
-    if (!data.localizador && data.Localizador) data.localizador = data.Localizador;
-    if (data.mensagem) data.mensagem = translateBookingError(data.mensagem);
-    if (!data.mensagem && data.Texto) data.mensagem = data.Texto;
-
-    res.json({ ok: isSuccess, data });
+    res.json({ ok: true, data: confirm.data });
   } catch (error) {
     console.error('[LP BOOKING] Error:', error.message);
     res.status(500).json({ ok: false, error: 'Erro ao confirmar reserva', detail: error.message });
@@ -4750,6 +4709,69 @@ async function verifyVindiBillPaid(billId, session, opts = {}) {
   }
 
   return { paid: true, status: chargeStatus, amount: paidAmount };
+}
+
+// Executa uma ação de reserva na Coobmais (AvailabilityBook ou BookingConfirmation)
+// usando sempre o mesmo corpo/identificadores institucionais (CNPJ, vfb_identifier,
+// third_guest_*). Retorna { ok, data, vfbMissing? }.
+async function performCoobmaisBookAction(action, body) {
+  const vfbId = await getAssociateNic(BOOKING_CNPJ);
+  console.log(`[LP ${action}] booking_code:`, body.booking_code, 'hotel_id:', body.hotel_id, 'cnpj:', BOOKING_CNPJ.substring(0, 4) + '***', 'vfb:', vfbId || 'NULL');
+
+  if (!vfbId) {
+    return { ok: false, vfbMissing: true, data: { sucesso: 0, mensagem: 'O cadastro institucional não está vinculado ao sistema de reservas. Entre em contato com o suporte.' } };
+  }
+
+  const response = await fetch(`${COOBMAIS_BASE_URL}/Book/${action}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${await ensureCoobToken()}`
+    },
+    body: JSON.stringify({
+      token: body.booking_code,
+      cpf: BOOKING_CNPJ,
+      hotel_id: parseInt(body.hotel_id),
+      vfb_points: 0,
+      vfb_identifier: vfbId,
+      third_guest_name: body.third_guest_name || '',
+      third_guest_cpf: (body.third_guest_cpf || '').replace(/\D/g, ''),
+      third_guest_ddd: body.third_guest_ddd || '',
+      third_guest_cellphone: body.third_guest_cellphone || '',
+      third_guest_email: body.third_guest_email || ''
+    })
+  });
+
+  const rawText = await response.text();
+  console.log(`[LP ${action}] Status:`, response.status, 'Body:', rawText.substring(0, 500));
+  let data;
+  try { data = JSON.parse(rawText); } catch { data = { sucesso: 0, mensagem: rawText || 'Resposta inválida' }; }
+  if (Array.isArray(data)) data = data[0] || { sucesso: 0, mensagem: 'Resposta vazia' };
+  const isSuccess = data.sucesso === 1 || data.sucesso === '1' || data.situacao === 1 || data.situacao === '1';
+  if (!data.localizador && data.Localizador) data.localizador = data.Localizador;
+  if (data.mensagem) data.mensagem = translateBookingError(data.mensagem);
+  if (!data.mensagem && data.Texto) data.mensagem = data.Texto;
+  return { ok: isSuccess, data };
+}
+
+// Estorna/cancela uma fatura na Vindi (mesmo padrão DELETE /bills/:id usado no
+// cancelamento de reservas) e marca o pagamento como cancelado no banco. Usado
+// quando o quarto fica indisponível DEPOIS do pagamento confirmado.
+async function refundVindiBill(billId, reason) {
+  if (!billId) return { refunded: false, error: 'Pagamento não identificado para estorno' };
+  try {
+    const vindiRes = await vindiRequest('DELETE', `/bills/${billId}`);
+    console.log('[LP REFUND] Vindi cancel response:', vindiRes.status, JSON.stringify(vindiRes.data).substring(0, 300), 'reason:', reason);
+    if (vindiRes.status >= 200 && vindiRes.status < 300) {
+      await query('UPDATE payments SET status = $1 WHERE vindi_bill_id = $2', ['canceled', String(billId)]);
+      console.log('[LP REFUND] Payment marked canceled for bill:', billId, 'reason:', reason);
+      return { refunded: true };
+    }
+    return { refunded: false, error: vindiRes.data?.errors?.[0]?.message || vindiRes.data?.message || `Erro Vindi HTTP ${vindiRes.status}` };
+  } catch (err) {
+    console.error('[LP REFUND] Error:', err.message);
+    return { refunded: false, error: err.message };
+  }
 }
 
 app.get('/api/vindi/payment-methods', async (req, res) => {

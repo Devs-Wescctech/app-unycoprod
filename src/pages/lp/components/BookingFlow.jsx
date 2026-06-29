@@ -53,13 +53,6 @@ const LOADING_MESSAGES = [
   { text: 'Preparando suas opções...', Icon: CheckCircle2 },
 ];
 
-const BOOKING_MESSAGES = [
-  { text: 'Verificando disponibilidade...', Icon: Eye },
-  { text: 'Confirmando tarifa Unyco...', Icon: Sparkles },
-  { text: 'Processando sua reserva...', Icon: Shield },
-  { text: 'Finalizando confirmação...', Icon: CheckCircle2 },
-];
-
 function AnimatedLoader({ messages }) {
   const [currentMsg, setCurrentMsg] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -173,12 +166,8 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
   const [apartments, setApartments] = useState([]);
   const [loadingApartments, setLoadingApartments] = useState(false);
   const [selectedApartment, setSelectedApartment] = useState(null);
-  const [checkingAvailability, setCheckingAvailability] = useState(false);
-  const [availabilityResult, setAvailabilityResult] = useState(null);
-  const [confirming, setConfirming] = useState(false);
   const [bookingResult, setBookingResult] = useState(null);
   const [bookingLocator, setBookingLocator] = useState(null);
-  const [reserving, setReserving] = useState(false);
   const [paymentCompleted, setPaymentCompleted] = useState(false);
   const [confirmingBooking, setConfirmingBooking] = useState(false);
   const [error, setError] = useState('');
@@ -235,7 +224,6 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
     setStep(1);
     setApartments([]);
     setSelectedApartment(null);
-    setAvailabilityResult(null);
     setBookingResult(null);
     setBookingLocator(null);
     setPaymentCompleted(false);
@@ -285,7 +273,6 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
 
   const handleSelectApartment = (apt) => {
     setSelectedApartment(apt);
-    setAvailabilityResult(null);
     setBookingResult(null);
     setBookingLocator(null);
     setError('');
@@ -297,57 +284,19 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
     setSelectedApartment(apt);
     setEffectiveDates({ checkIn, checkOut });
     setAlternativesModalOpen(false);
-    setAvailabilityResult(null);
     setBookingResult(null);
     setBookingLocator(null);
     setError('');
     setStep(2);
   };
 
-  const proceedWithReservation = async (aptToUse) => {
-    const apt = aptToUse || selectedApartment;
-    if (!apt) return;
+  // A disponibilidade (AvailabilityBook) deixou de ser checada aqui: agora ela roda
+  // no servidor DEPOIS do pagamento confirmado, junto da confirmação da reserva.
+  // O cliente vai direto da revisão para o pagamento.
+  const handleReserveAndGoToPayment = () => {
+    if (!selectedApartment) return;
     setError('');
-    setReserving(true);
-    setCheckingAvailability(true);
-
-    try {
-      const cleanPhone = (user?.phone || '').replace(/\D/g, '');
-      const availRes = await fetch('/api/lp/availability-book', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          booking_code: apt.booking_code,
-          hotel_id: hotel.id,
-          third_guest_name: user?.name || '',
-          third_guest_cpf: (user?.cpf || '').replace(/\D/g, ''),
-          third_guest_ddd: cleanPhone.substring(0, 2),
-          third_guest_cellphone: cleanPhone.substring(2),
-          third_guest_email: user?.email || '',
-        }),
-      });
-      const availData = await availRes.json();
-      setAvailabilityResult(availData);
-
-      if (!availData.ok) {
-        setError(availData.data?.mensagem || availData.error || 'Hospedagem indisponível. Tente outras datas ou outro quarto.');
-        return;
-      }
-
-      setCheckingAvailability(false);
-      setStep(3);
-    } catch {
-      setError('Erro de conexão ao verificar disponibilidade. Tente novamente.');
-    } finally {
-      setReserving(false);
-      setCheckingAvailability(false);
-      setConfirming(false);
-    }
-  };
-
-  const handleReserveAndGoToPayment = async () => {
-    await proceedWithReservation(selectedApartment);
+    setStep(3);
   };
 
   const handlePaymentSuccess = async (paymentResult) => {
@@ -519,21 +468,17 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
           <div style={{ animation: 'fadeSlideIn 0.4s ease-out' }}>
             {step === 1 && <StepApartments apartments={apartments} loading={loadingApartments} onSelect={handleSelectApartment} extendedBy={extendedBy} checkOut={searchParams?.checkOut} />}
             {step === 2 && selectedApartment && (
-              reserving ? (
-                <AnimatedLoader messages={BOOKING_MESSAGES} />
-              ) : (
-                <StepReview
-                  apartment={selectedApartment}
-                  hotel={hotel}
-                  searchParams={activeSearchParams}
-                  user={user}
-                  expandedPolicy={expandedPolicy}
-                  setExpandedPolicy={setExpandedPolicy}
-                  onConfirm={handleReserveAndGoToPayment}
-                  onBack={() => { setStep(1); setSelectedApartment(null); setAvailabilityResult(null); setBookingResult(null); setBookingLocator(null); setError(''); }}
-                  onUserUpdate={onUserUpdate}
-                />
-              )
+              <StepReview
+                apartment={selectedApartment}
+                hotel={hotel}
+                searchParams={activeSearchParams}
+                user={user}
+                expandedPolicy={expandedPolicy}
+                setExpandedPolicy={setExpandedPolicy}
+                onConfirm={handleReserveAndGoToPayment}
+                onBack={() => { setStep(1); setSelectedApartment(null); setBookingResult(null); setBookingLocator(null); setError(''); }}
+                onUserUpdate={onUserUpdate}
+              />
             )}
             {step === 3 && (
               <PaymentFlow

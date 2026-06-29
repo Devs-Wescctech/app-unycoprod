@@ -51,10 +51,11 @@ destino + datas      ─►  POST /api/lp/hotels       ─► Coobmais GetCities
                                                      ─► Coobmais GetHotels   → lista de hotéis (id, cost)
 clica num hotel      ─►  GET  /api/lp/hotel-info    ─► Coobmais InfoHotels   → fotos, dados do hotel
 escolhe datas/quarto ─►  POST /api/lp/info-apartment─► Coobmais InfoApartment→ booking_code + cost
-clica "reservar"     ─►  POST /api/lp/availability-book ─► Coobmais AvailabilityBook → disponível?
+clica "reservar"     ─►  (vai direto ao pagamento — sem pré-reserva)
 escolhe pagamento    ─►  POST /api/vindi/create-bill─► Vindi POST /bills     → bill_id (+ PIX QR)
 (PIX) aguarda        ─►  GET  /api/vindi/bill/:id   ─► Vindi GET /bills/:id  → status: paid
-pagamento ok         ─►  POST /api/lp/booking-confirmation ─► Coobmais BookingConfirmation → localizador
+pagamento ok         ─►  POST /api/lp/booking-confirmation ─► Coobmais AvailabilityBook + BookingConfirmation → localizador
+                                                     (se indisponível: DELETE /bills/:id na Vindi → estorno automático)
 reserva confirmada   ─►  POST /api/lp/bookings      ─► PostgreSQL            → reserva gravada
 ```
 
@@ -304,50 +305,20 @@ que carregamos por todo o resto do fluxo (pré-reserva, pagamento e confirmaçã
 
 ---
 
-### Passo 5 — Cliente clica em reservar → pré-reserva na Coobmais
+### Passo 5 — Cliente clica em reservar → vai direto ao pagamento
 
-**Cliente envia:** o `booking_code` do apartamento + o `hotel_id`.
+**Mudança importante:** o `AvailabilityBook` (pré-reserva na Coobmais) **não é mais
+chamado aqui**. Antes ele rodava neste momento, o que gerava pré-reservas órfãs de
+carrinhos abandonados (cliente reservava e nunca pagava). Agora o cliente vai direto
+da revisão para o pagamento, e a Coobmais só é "tocada" **depois** que o dinheiro
+está garantido — o `AvailabilityBook` passou para o Passo 8, junto da confirmação.
 
-**Servidor pega:** esses dados e monta a chamada à Coobmais usando o **CNPJ
-institucional do UNYCO** e o identificador do associado institucional (`vfb_identifier`,
-que o servidor obtém antes via `Associate/GetAssociate`).
+**Cliente envia:** nada de novo neste passo — apenas avança da revisão da reserva para
+a tela de pagamento.
 
-| | |
-| --- | --- |
-| Rota interna | `POST /api/lp/availability-book` |
-| API externa chamada | Coobmais — `POST {BASE}/Book/AvailabilityBook` (e `GET {BASE}/Associate/GetAssociate` para o `vfb_identifier`) |
-
-Corpo enviado à Coobmais:
-
-```json
-{
-  "token": "ABC123XYZ",
-  "cpf": "1573933000130",
-  "hotel_id": 12345,
-  "vfb_points": 0,
-  "vfb_identifier": "<nic institucional>",
-  "third_guest_name": "",
-  "third_guest_cpf": "",
-  "third_guest_ddd": "",
-  "third_guest_cellphone": "",
-  "third_guest_email": ""
-}
-```
-
-```bash
-curl -X POST 'https://unycoclub.com.br/api/lp/availability-book' \
-  -H 'Content-Type: application/json' \
-  -d '{ "booking_code": "ABC123XYZ", "hotel_id": 12345 }'
-```
-
-**Coobmais retorna** se o apartamento segue disponível:
-
-```json
-{ "ok": true, "data": { "sucesso": 1, "mensagem": "Disponível" } }
-```
-
-**Como alimenta o próximo passo:** confirmada a disponibilidade, seguimos para o
-pagamento na Vindi.
+> O endpoint `POST /api/lp/availability-book` continua existindo (e usa exatamente o
+> mesmo corpo institucional descrito no Passo 8), mas não faz mais parte do fluxo
+> normal de reserva.
 
 ---
 
@@ -468,19 +439,26 @@ confirmar a reserva na Coobmais.
 
 ---
 
-### Passo 8 — Pagamento confirmado → confirmamos a reserva na Coobmais
+### Passo 8 — Pagamento confirmado → disponibilidade + confirmação na Coobmais
 
 **Cliente envia:** o `booking_code`, o `hotel_id` e o `bill_id` pago.
 
-**Servidor pega:** esses dados e chama `Book/BookingConfirmation`, novamente com o CNPJ
-institucional e o `vfb_identifier`.
+**Servidor pega:** esses dados e, **somente após confirmar o pagamento**
+(`verifyVindiBillPaid` — checa dono/CPF, vínculo fatura↔`booking_code`, anti-replay,
+status `paid` e valor), executa **em sequência**, ambos com o CNPJ institucional e o
+`vfb_identifier`:
+
+1. **`Book/AvailabilityBook`** — a pré-reserva, que antes rodava no Passo 5, acontece
+   agora aqui (depois do dinheiro garantido).
+2. **`Book/BookingConfirmation`** — confirma a reserva e devolve o `localizador`.
 
 | | |
 | --- | --- |
 | Rota interna | `POST /api/lp/booking-confirmation` |
-| API externa chamada | Coobmais — `POST {BASE}/Book/BookingConfirmation` |
+| APIs externas | Coobmais — `POST {BASE}/Book/AvailabilityBook` **e depois** `POST {BASE}/Book/BookingConfirmation` |
+| Trava de pagamento | `verifyVindiBillPaid` (mesma que já protegia a confirmação) |
 
-Corpo enviado à Coobmais:
+Corpo enviado à Coobmais (idêntico nas duas chamadas):
 
 ```json
 {
@@ -509,6 +487,27 @@ curl -X POST 'https://unycoclub.com.br/api/lp/booking-confirmation' \
 {
   "ok": true,
   "data": { "sucesso": 1, "localizador": "UNY-2026-000123", "mensagem": "Reserva confirmada" }
+}
+```
+
+#### Caminho de exceção — pagou mas o quarto ficou indisponível
+
+Como o `AvailabilityBook` agora roda **depois** do pagamento, existe o risco de o
+quarto não estar mais disponível nesse instante. Se o `AvailabilityBook` **ou** o
+`BookingConfirmation` falharem:
+
+1. O servidor **estorna automaticamente** a fatura na Vindi (`DELETE /bills/:id`).
+2. Marca o pagamento como `canceled` no nosso banco.
+3. **Não grava** a reserva.
+4. Responde ao cliente com `HTTP 409` e uma mensagem clara de que o quarto deixou de
+   estar disponível e o valor será estornado:
+
+```json
+{
+  "ok": false,
+  "unavailable": true,
+  "refunded": true,
+  "error": "Quarto indisponível. Seu pagamento será estornado integralmente."
 }
 ```
 
@@ -576,10 +575,10 @@ isso é interno e não envolve as APIs de reserva.
 | 2 | `/api/lp/hotels` | POST | Coobmais | `Book/GetCities` + `Book/GetHotels` | lista de hotéis (`id`, `cost`) |
 | 3 | `/api/lp/hotel-info` | GET | Coobmais | `Book/InfoHotels` | detalhes do hotel |
 | 4 | `/api/lp/info-apartment` | POST | Coobmais | `Book/InfoApartment` | `booking_code` |
-| 5 | `/api/lp/availability-book` | POST | Coobmais | `Book/AvailabilityBook` | disponibilidade |
+| 5 | (vai direto ao pagamento) | — | — | — | — |
 | 6 | `/api/vindi/create-bill` | POST | Vindi | `POST /customers`, `/payment_profiles`, `/bills` | `bill_id` (+ PIX) |
 | 7 | `/api/vindi/bill/:id` | GET | Vindi | `GET /bills/:id` | status do pagamento |
-| 8 | `/api/lp/booking-confirmation` | POST | Coobmais | `Book/BookingConfirmation` | `localizador` |
+| 8 | `/api/lp/booking-confirmation` | POST | Coobmais | `Book/AvailabilityBook` + `Book/BookingConfirmation` | `localizador` (ou estorno na Vindi se indisponível) |
 | 9 | `/api/lp/bookings` | POST | PostgreSQL | — | reserva gravada |
 
 ---
