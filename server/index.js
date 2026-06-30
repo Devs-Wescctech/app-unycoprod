@@ -2751,8 +2751,6 @@ app.post('/api/hotels/search', async (req, res) => {
   }
 });
 
-const COOBMAIS_UNICO_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiJBUjZtdlp6R0h5UTZaOEpUczBjOUVnOXlMbGQxTWN0WlFkNmMxbEc4MEd1Q3dnMlhmRCIsInJvbGUiOiJVc2VyIiwic2Vzc2lvblR5cGUiOiJVbmljbyIsImVudmlyb21lbnQiOiJQcm9kdWN0aW9uIiwibmJmIjoxNzc5Mzc1OTAzLCJleHAiOjE3ODIxMTE5MDMsImlhdCI6MTc3OTM3NTkwMywiaXNzIjoiYXBpcHJvZC5jb29ibWFpcyIsImF1ZCI6ImFwaXByb2QuY29vYm1haXMifQ.LDuBhGmwOPWlmqjhRKOqWiJkun17SbzPxHvC_4f-I0c';
-
 const FEATURED_CITIES = [
   'RIO DE JANEIRO',
   'PORTO DE GALINHAS',
@@ -2767,9 +2765,9 @@ const FEATURED_CITIES = [
 ];
 
 async function getCityPlaceId(cidade) {
-  const r = await fetch('https://apiprod.coobmais.com.br/unico/api/Book/GetCities', {
+  const r = await fetch(`${COOBMAIS_BASE_URL}/Book/GetCities`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${COOBMAIS_UNICO_TOKEN}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await ensureCoobToken()}` },
     body: JSON.stringify({ cidade }),
   });
   if (!r.ok) return null;
@@ -2784,9 +2782,9 @@ async function getFirstHotelForCity(google_place_id, cityLabel) {
   const checkInDate = addDays(today, 30);
   const checkInMonth = checkInDate.getMonth() + 1;
 
-  const r = await fetch('https://apiprod.coobmais.com.br/unico/api/Book/GetHotels', {
+  const r = await fetch(`${COOBMAIS_BASE_URL}/Book/GetHotels`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${COOBMAIS_UNICO_TOKEN}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await ensureCoobToken()}` },
     body: JSON.stringify({
       start_date: fmt(checkInDate),
       end_date: fmt(addDays(today, 35)),
