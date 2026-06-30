@@ -3619,7 +3619,7 @@ function addDaysDate(date, n) {
   return r;
 }
 
-async function probeInfoApartment({ hotel_id, start_date, end_date, adults, children }) {
+async function probeInfoApartment({ hotel_id, start_date, end_date, adults, children, requireImmediate = true }) {
   const payload = {
     hotel_id: parseInt(hotel_id),
     start_date,
@@ -3643,7 +3643,9 @@ async function probeInfoApartment({ hotel_id, start_date, end_date, adults, chil
     if (!response.ok) return { apartments: [] };
     const data = await response.json();
     const list = Array.isArray(data) ? data : (data?.apartments || data?.data || []);
-    const apartments = list.map(item => item.apartment || item).filter(a => a && a.availability === 'imediata');
+    const apartments = list
+      .map(item => item.apartment || item)
+      .filter(a => requireImmediate ? (a && a.availability === 'imediata') : !!a);
     return { apartments };
   } catch (e) {
     return { apartments: [], error: e.message };
@@ -4536,9 +4538,53 @@ function vindiRequest(method, endpoint, body = null) {
 // custo retornado pela Coobmais (InfoApartment) para a MESMA combinação
 // hotel_id + booking_code + datas + hóspedes. É a fonte da verdade do valor a
 // cobrar — o cliente não pode forjar um valor menor no create-bill.
-// Retorna o total (number) ou null quando não dá para determinar com segurança.
-async function computeAuthoritativeApartmentTotal({ hotel_id, booking_code, start_date, end_date, adults, children }) {
-  if (!hotel_id || !booking_code || !start_date || !end_date) return null;
+// Resolve a tarifa diária CRM (R$/diária) por categoria/temporada para um hotel
+// numa data de check-in. Mesma lógica do /api/lp/hotels. Retorna number > 0 ou null.
+async function resolveCrmDailyRate(hotel_id, checkInDate) {
+  try {
+    const category = await getHotelCategory(hotel_id);
+    if (!category) return null;
+    const allRates = await query('SELECT * FROM category_rates');
+    if (allRates.rows.length === 0) return null;
+    const ratesByName = {};
+    const ratesById = {};
+    allRates.rows.forEach(r => {
+      ratesByName[r.category_name.toLowerCase()] = r;
+      ratesById[r.category_id] = r;
+    });
+    const isNum = !isNaN(category);
+    const rate = isNum ? ratesById[category] : ratesByName[String(category).toLowerCase()];
+    if (!rate) return null;
+    let highSeasonMonths = [1, 2, 7, 12];
+    try {
+      const seasonRow = await query('SELECT high_season_months FROM season_config WHERE id = 1');
+      if (seasonRow.rows.length > 0) highSeasonMonths = seasonRow.rows[0].high_season_months;
+    } catch {}
+    const checkInMonth = checkInDate.getMonth() + 1;
+    const isHighSeason = highSeasonMonths.includes(checkInMonth);
+    const lowRate = parseFloat(rate.low_season_rate) || 0;
+    const highRate = parseFloat(rate.high_season_rate) || 0;
+    const appliedRate = isHighSeason ? (highRate || lowRate) : (lowRate || highRate);
+    return appliedRate && appliedRate > 0 ? appliedRate : null;
+  } catch (e) {
+    console.error('[VINDI] resolveCrmDailyRate error:', e.message);
+    return null;
+  }
+}
+
+// Calcula o total autoritativo de um apartamento (custo Coobmais + tarifa CRM),
+// reconsultando a Coobmais com os MESMOS parâmetros da busca (datas efetivas,
+// adultos/crianças) e SEM exigir disponibilidade "imediata" — basta a Coobmais
+// ainda devolver o apartamento. Retorna { matched, candidates } onde:
+//   - matched: total do booking_code exato (number) ou null se não encontrado;
+//   - candidates: [{ booking_code, type, availability, total }] de todos os
+//     apartamentos devolvidos — usado como fallback quando o booking_code muda
+//     entre a busca e o pagamento (Coobmais às vezes troca o código).
+// A regra de nunca cobrar a menos continua valendo: o valor cobrado vem sempre
+// de um apartamento real devolvido pela Coobmais.
+async function computeAuthoritativeApartmentTotals({ hotel_id, booking_code, start_date, end_date, adults, children }) {
+  const empty = { matched: null, candidates: [] };
+  if (!hotel_id || !booking_code || !start_date || !end_date) return empty;
 
   // Coobmais InfoApartment espera dd/MM/yyyy. Aceitamos dd/MM/yyyy ou yyyy-MM-dd
   // do cliente e normalizamos para o formato que a Coobmais entende.
@@ -4553,63 +4599,49 @@ async function computeAuthoritativeApartmentTotal({ hotel_id, booking_code, star
 
   const ci = parseFlexibleDate(start_date);
   const co = parseFlexibleDate(end_date);
-  if (!ci || !co || isNaN(ci) || isNaN(co)) return null;
+  if (!ci || !co || isNaN(ci) || isNaN(co)) return empty;
 
   let probe;
   try {
-    probe = await probeInfoApartment({ hotel_id, start_date: toDDMMYYYY(ci), end_date: toDDMMYYYY(co), adults, children });
+    probe = await probeInfoApartment({
+      hotel_id, start_date: toDDMMYYYY(ci), end_date: toDDMMYYYY(co), adults, children,
+      requireImmediate: false,
+    });
   } catch (e) {
-    console.error('[VINDI] computeAuthoritativeApartmentTotal probe error:', e.message);
-    return null;
+    console.error('[VINDI] computeAuthoritativeApartmentTotals probe error:', e.message);
+    return empty;
   }
-  const apt = (probe.apartments || []).find(a => String(a.booking_code) === String(booking_code));
-  if (!apt) return null;
 
   const nights = Math.max(0, Math.round((co - ci) / (1000 * 60 * 60 * 24)));
+  const appliedRate = await resolveCrmDailyRate(hotel_id, ci);
 
-  let cost = Array.isArray(apt.cost) ? apt.cost.map(c => ({ daily: c.daily || 0, extras: c.extras || 0 })) : [];
-
-  // Tarifa CRM por categoria/temporada (mesma lógica do /api/lp/hotels)
-  try {
-    const category = await getHotelCategory(hotel_id);
-    if (category) {
-      const allRates = await query('SELECT * FROM category_rates');
-      if (allRates.rows.length > 0) {
-        const ratesByName = {};
-        const ratesById = {};
-        allRates.rows.forEach(r => {
-          ratesByName[r.category_name.toLowerCase()] = r;
-          ratesById[r.category_id] = r;
-        });
-        const isNum = !isNaN(category);
-        const rate = isNum ? ratesById[category] : ratesByName[String(category).toLowerCase()];
-        if (rate) {
-          let highSeasonMonths = [1, 2, 7, 12];
-          try {
-            const seasonRow = await query('SELECT high_season_months FROM season_config WHERE id = 1');
-            if (seasonRow.rows.length > 0) highSeasonMonths = seasonRow.rows[0].high_season_months;
-          } catch {}
-          const checkInMonth = ci.getMonth() + 1;
-          const isHighSeason = highSeasonMonths.includes(checkInMonth);
-          const lowRate = parseFloat(rate.low_season_rate) || 0;
-          const highRate = parseFloat(rate.high_season_rate) || 0;
-          const appliedRate = isHighSeason ? (highRate || lowRate) : (lowRate || highRate);
-          if (appliedRate && appliedRate > 0) {
-            if (cost.length > 0) {
-              cost = cost.map(c => ({ daily: appliedRate, extras: c.extras }));
-            } else if (nights > 0) {
-              cost = Array.from({ length: nights }, () => ({ daily: appliedRate, extras: 0 }));
-            }
-          }
-        }
+  const totalForApt = (apt) => {
+    let cost = Array.isArray(apt.cost) ? apt.cost.map(c => ({ daily: c.daily || 0, extras: c.extras || 0 })) : [];
+    if (appliedRate && appliedRate > 0) {
+      if (cost.length > 0) {
+        cost = cost.map(c => ({ daily: appliedRate, extras: c.extras }));
+      } else if (nights > 0) {
+        cost = Array.from({ length: nights }, () => ({ daily: appliedRate, extras: 0 }));
       }
     }
-  } catch (e) {
-    console.error('[VINDI] computeAuthoritativeApartmentTotal rate error:', e.message);
-  }
+    const total = cost.reduce((sum, c) => sum + (c.daily || 0) + (c.extras || 0), 0);
+    return total > 0 ? total : null;
+  };
 
-  const total = cost.reduce((sum, c) => sum + (c.daily || 0) + (c.extras || 0), 0);
-  return total > 0 ? total : null;
+  const list = probe.apartments || [];
+  const candidates = list
+    .map(a => ({
+      booking_code: String(a.booking_code),
+      type: a.type || a.nomenclature || null,
+      availability: a.availability || null,
+      total: totalForApt(a),
+    }))
+    .filter(c => c.total != null);
+
+  const matchedApt = list.find(a => String(a.booking_code) === String(booking_code));
+  const matched = matchedApt ? totalForApt(matchedApt) : null;
+
+  return { matched, candidates };
 }
 
 // Gate de verificação de pagamento: consulta a Vindi e só retorna paid:true
@@ -4926,17 +4958,55 @@ app.post('/api/vindi/create-bill', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Não foi possível validar a reserva (dados do apartamento ausentes). Reinicie a reserva e tente novamente.' });
     }
 
-    const authoritativeAmount = await computeAuthoritativeApartmentTotal({
+    const clientAmount = parseFloat(amount);
+    if (!Number.isFinite(clientAmount) || clientAmount <= 0) {
+      console.warn('[VINDI] Invalid client amount at create-bill:', amount, 'booking_code:', booking_code);
+      return res.status(400).json({ ok: false, error: 'Valor da reserva inválido. Reinicie a reserva e tente novamente.' });
+    }
+
+    const { matched, candidates } = await computeAuthoritativeApartmentTotals({
       hotel_id, booking_code, start_date: check_in, end_date: check_out, adults, children,
     });
+
+    // Tolerância robusta: cobre arredondamentos/extras de consultas distintas
+    // (R$ 1,00 ou 1% do valor, o que for maior). Como SEMPRE cobramos o valor
+    // autoritativo do servidor (vindo de um apartamento real da Coobmais), uma
+    // tolerância mais folgada não abre brecha para forjar valor a menor.
+    const tolFor = (ref) => Math.max(1, ref * 0.01);
+
+    let authoritativeAmount = null;
+
+    if (matched != null) {
+      // Caminho normal: booking_code encontrado na reconsulta.
+      authoritativeAmount = matched;
+    } else if (candidates.length > 0) {
+      // booking_code instável (a Coobmais às vezes troca o código entre a busca e
+      // o pagamento). Casamos pelo valor: aceitamos quando o total recalculado de
+      // algum apartamento real bate com o que o cliente viu. Escolhemos o
+      // candidato mais próximo do valor do cliente.
+      const within = candidates
+        .filter(c => Math.abs(c.total - clientAmount) <= tolFor(c.total))
+        .sort((a, b) => Math.abs(a.total - clientAmount) - Math.abs(b.total - clientAmount));
+      if (within.length > 0) {
+        authoritativeAmount = within[0].total;
+        console.warn('[VINDI] booking_code não encontrado; casado por valor.',
+          'booking_code:', booking_code, 'novo_code:', within[0].booking_code,
+          'valor:', authoritativeAmount);
+      }
+    }
+
     if (authoritativeAmount == null) {
-      console.warn('[VINDI] Could not compute authoritative amount for booking_code', booking_code, 'hotel', hotel_id);
+      console.warn('[VINDI] Não foi possível confirmar preço da reserva.',
+        JSON.stringify({
+          booking_code, hotel_id, check_in, check_out, adults, children,
+          clientAmount, matched, candidates: candidates.map(c => ({ code: c.booking_code, total: c.total, avail: c.availability })),
+        }));
       return res.status(422).json({ ok: false, error: 'Não foi possível confirmar o preço da reserva no momento. A disponibilidade pode ter mudado — reinicie a reserva e tente novamente.' });
     }
 
-    const clientAmount = parseFloat(amount);
-    if (!Number.isFinite(clientAmount) || Math.abs(clientAmount - authoritativeAmount) > 0.01) {
-      console.warn('[VINDI] Amount mismatch at create-bill. client:', clientAmount, 'authoritative:', authoritativeAmount, 'booking_code:', booking_code);
+    if (Math.abs(clientAmount - authoritativeAmount) > tolFor(authoritativeAmount)) {
+      console.warn('[VINDI] Amount mismatch at create-bill.',
+        JSON.stringify({ clientAmount, authoritativeAmount, booking_code, check_in, check_out }));
       return res.status(422).json({ ok: false, error: 'O valor da reserva mudou. Reinicie a reserva para ver o preço atualizado.' });
     }
 

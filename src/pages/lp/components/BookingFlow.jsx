@@ -276,7 +276,15 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
     setBookingResult(null);
     setBookingLocator(null);
     setError('');
-    setEffectiveDates(null);
+    // Quando a busca estendeu o check-out (extendedBy > 0), o apartamento da
+    // lista corresponde às datas estendidas. Precisamos enviar essas datas
+    // efetivas ao pagamento/reconsulta — senão o servidor reconsulta as datas
+    // originais (sem vaga) e barra um pagamento legítimo.
+    if (extendedBy > 0 && searchParams?.checkIn && searchParams?.checkOut) {
+      setEffectiveDates({ checkIn: searchParams.checkIn, checkOut: addDays(searchParams.checkOut, extendedBy) });
+    } else {
+      setEffectiveDates(null);
+    }
     setStep(2);
   };
 
