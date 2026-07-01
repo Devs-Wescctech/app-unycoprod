@@ -4240,18 +4240,7 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
     if (b.status === 'cancelled') return res.json({ ok: true, data: b, message: 'Reserva já cancelada' });
 
     const cancelToken = b.booking_code || b.localizador;
-    const vfbId = await getAssociateNic(BOOKING_CNPJ);
-    console.log('[LP BOOKINGS] Cancel using token (booking_code):', cancelToken, 'localizador:', b.localizador, 'cnpj:', BOOKING_CNPJ.substring(0, 4) + '***', 'vfb:', vfbId || 'NULL');
-
-    if (!vfbId) {
-      console.log('[LP BOOKINGS] Associate not found for CNPJ, cannot cancel');
-      return res.json({ ok: false, error: 'O cadastro institucional não está vinculado ao sistema de reservas. Entre em contato com o suporte.' });
-    }
-
-    if (!COOBMAIS_CANCEL_PASSWORD) {
-      console.log('[LP BOOKINGS] Cancel password not configured');
-      return res.json({ ok: false, error: 'A senha de cancelamento do associado não está configurada. Configure-a na Central de APIs (Coobmais) para permitir cancelamentos.' });
-    }
+    console.log('[LP BOOKINGS] Cancel using token (booking_code):', cancelToken, 'localizador:', b.localizador);
 
     let bookingCancelOk = false;
     let bookingCancelMsg = '';
@@ -4263,10 +4252,7 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
           'Authorization': `Bearer ${await ensureCoobToken()}`
         },
         body: JSON.stringify({
-          token: cancelToken,
-          cpf: BOOKING_CNPJ,
-          vfb_identifier: vfbId,
-          senha: COOBMAIS_CANCEL_PASSWORD
+          token: cancelToken
         })
       });
       const cancelText = await cancelRes.text();
@@ -5254,18 +5240,7 @@ app.patch('/api/payments/:id/cancel-booking', async (req, res) => {
 
     if (!bookingCancelOk) {
       const cancelToken = b.booking_code || b.localizador;
-      const vfbId = await getAssociateNic(BOOKING_CNPJ);
-      console.log('[PAYMENTS CANCEL] Cancel using token (booking_code):', cancelToken, 'localizador:', b.localizador, 'cnpj:', BOOKING_CNPJ.substring(0, 4) + '***', 'vfb:', vfbId || 'NULL');
-
-      if (!vfbId) {
-        console.log('[PAYMENTS CANCEL] Associate not found for CNPJ, cannot cancel');
-        return res.json({ ok: false, error: 'O cadastro institucional não está vinculado ao sistema de reservas. Entre em contato com o suporte.' });
-      }
-
-      if (!COOBMAIS_CANCEL_PASSWORD) {
-        console.log('[PAYMENTS CANCEL] Cancel password not configured');
-        return res.json({ ok: false, error: 'A senha de cancelamento do associado não está configurada. Configure-a na Central de APIs (Coobmais) para permitir cancelamentos.' });
-      }
+      console.log('[PAYMENTS CANCEL] Cancel using token (booking_code):', cancelToken, 'localizador:', b.localizador);
 
       try {
         const cancelRes = await fetch(`${COOBMAIS_BASE_URL}/Book/CancellationBook`, {
@@ -5275,10 +5250,7 @@ app.patch('/api/payments/:id/cancel-booking', async (req, res) => {
             'Authorization': `Bearer ${await ensureCoobToken()}`
           },
           body: JSON.stringify({
-            token: cancelToken,
-            cpf: BOOKING_CNPJ,
-            vfb_identifier: vfbId,
-            senha: COOBMAIS_CANCEL_PASSWORD
+            token: cancelToken
           })
         });
         const cancelText = await cancelRes.text();
