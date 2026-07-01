@@ -3851,6 +3851,33 @@ function translateBookingError(rawMsg) {
   return rawMsg;
 }
 
+// Detecta erros TRANSITÓRIOS da Coobmais (deadlock/timeout momentâneo) que a
+// própria API pede para repetir. Diferente de falhas permanentes (quarto
+// indisponível de verdade, dados inválidos), estes devem ser retentados.
+function isTransientBookError(rawMsg) {
+  if (!rawMsg) return false;
+  const s = String(rawMsg).toLowerCase();
+  return /deadlock|v[íi]tima|execute a transa[çc][ãa]o novamente|tempo limite|lock request time out/.test(s);
+}
+
+// Executa uma ação da Coobmais (AvailabilityBook/BookingConfirmation) com retry
+// automático APENAS para erros transitórios de deadlock. Erros permanentes
+// falham na primeira tentativa (sem retry).
+async function performCoobmaisBookActionWithRetry(action, body, { retries = 2, delayMs = 800 } = {}) {
+  let result;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    result = await performCoobmaisBookAction(action, body);
+    if (result.ok || !result.transient) return result;
+    if (attempt < retries) {
+      console.warn(`[LP ${action}] Erro transitório da Coobmais (deadlock) — tentativa ${attempt + 1}/${retries + 1}. Retentando em ${delayMs}ms.`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    } else {
+      console.warn(`[LP ${action}] Erro transitório persistiu após ${retries + 1} tentativas. Desistindo.`);
+    }
+  }
+  return result;
+}
+
 app.post('/api/lp/availability-book', async (req, res) => {
   try {
     const lpToken = parseLpToken(req);
@@ -3906,17 +3933,19 @@ app.post('/api/lp/booking-confirmation', async (req, res) => {
         ? `${baseMsg} Seu pagamento será estornado integralmente.`
         : `${baseMsg} Não conseguimos estornar automaticamente — entre em contato com o suporte informando seu pagamento.`;
       console.warn('[LP BOOKING] Indisponível após pagamento. bill_id:', bill_id, 'reason:', reason, 'refunded:', refund.refunded);
-      return res.status(409).json({ ok: false, error: msg, unavailable: true, refunded: refund.refunded });
+      // charged: o pagamento já foi confirmado neste ponto (verifyVindiBillPaid passou),
+      // então o frontend nunca deve dizer "nenhum valor foi cobrado" aqui.
+      return res.status(409).json({ ok: false, error: msg, unavailable: true, charged: true, refunded: refund.refunded });
     };
 
-    // 1. AvailabilityBook (agora DEPOIS do pagamento confirmado).
-    const avail = await performCoobmaisBookAction('AvailabilityBook', guestBody);
+    // 1. AvailabilityBook (agora DEPOIS do pagamento confirmado). Retry em deadlock.
+    const avail = await performCoobmaisBookActionWithRetry('AvailabilityBook', guestBody);
     if (!avail.ok) {
       return refundAndRespond(avail.data, 'availability_failed');
     }
 
-    // 2. BookingConfirmation.
-    const confirm = await performCoobmaisBookAction('BookingConfirmation', guestBody);
+    // 2. BookingConfirmation. Retry em deadlock transitório.
+    const confirm = await performCoobmaisBookActionWithRetry('BookingConfirmation', guestBody);
     if (!confirm.ok) {
       return refundAndRespond(confirm.data, 'confirmation_failed');
     }
@@ -4770,10 +4799,13 @@ async function performCoobmaisBookAction(action, body) {
   try { data = JSON.parse(rawText); } catch { data = { sucesso: 0, mensagem: rawText || 'Resposta inválida' }; }
   if (Array.isArray(data)) data = data[0] || { sucesso: 0, mensagem: 'Resposta vazia' };
   const isSuccess = data.sucesso === 1 || data.sucesso === '1' || data.situacao === 1 || data.situacao === '1';
+  // Avalia a mensagem BRUTA (antes da tradução) para detectar deadlock transitório.
+  const rawMensagem = data.mensagem || data.Texto || rawText;
+  const transient = !isSuccess && isTransientBookError(rawMensagem);
   if (!data.localizador && data.Localizador) data.localizador = data.Localizador;
   if (data.mensagem) data.mensagem = translateBookingError(data.mensagem);
   if (!data.mensagem && data.Texto) data.mensagem = data.Texto;
-  return { ok: isSuccess, data };
+  return { ok: isSuccess, transient, data };
 }
 
 // Estorna/cancela uma fatura na Vindi (mesmo padrão DELETE /bills/:id usado no

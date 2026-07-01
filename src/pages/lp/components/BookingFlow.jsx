@@ -171,6 +171,9 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
   const [paymentCompleted, setPaymentCompleted] = useState(false);
   const [confirmingBooking, setConfirmingBooking] = useState(false);
   const [error, setError] = useState('');
+  // Estado real de cobrança após pagamento: null (sem cobrança) | 'refunded'
+  // (cobrado e estornado) | 'charged' (cobrado e NÃO estornado).
+  const [chargeState, setChargeState] = useState(null);
   const [expandedPolicy, setExpandedPolicy] = useState(false);
   const [alternativesModalOpen, setAlternativesModalOpen] = useState(false);
   const [effectiveDates, setEffectiveDates] = useState(null);
@@ -228,6 +231,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
     setBookingLocator(null);
     setPaymentCompleted(false);
     setError('');
+    setChargeState(null);
     setExpandedPolicy(false);
     setEffectiveDates(null);
     setExtendedBy(0);
@@ -346,6 +350,9 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
         } else {
           console.error('Falha ao confirmar reserva na Coobmais após pagamento:', confirmData);
           setConfirmingBooking(false);
+          if (confirmData.charged) {
+            setChargeState(confirmData.refunded ? 'refunded' : 'charged');
+          }
           setError(confirmData.error || confirmData.data?.mensagem || 'Não foi possível confirmar a reserva. O pagamento não foi confirmado.');
           return;
         }
@@ -382,7 +389,9 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
       if (!saveData.ok) {
         console.error('Falha ao registrar reserva após pagamento:', saveData);
         setConfirmingBooking(false);
-        setError(saveData.error || 'Não foi possível registrar a reserva. O pagamento não foi confirmado.');
+        // Coobmais já confirmou e o pagamento foi cobrado; não afirmar "nenhum valor foi cobrado".
+        setChargeState('charged');
+        setError(saveData.error || 'Não foi possível registrar a reserva. Entre em contato com o suporte informando seu pagamento.');
         return;
       }
 
@@ -400,6 +409,8 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
       setPaymentCompleted(true);
     } catch (e) {
       console.error('Erro ao confirmar reserva:', e);
+      // Pagamento já aprovado neste ponto; não afirmar "nenhum valor foi cobrado".
+      setChargeState('charged');
       setError('Ocorreu um erro ao confirmar a reserva. Entre em contato com o suporte informando seu pagamento.');
     } finally {
       setConfirmingBooking(false);
@@ -512,6 +523,7 @@ export default function BookingFlow({ hotel, searchParams, user, open, onClose, 
                 paymentCompleted={paymentCompleted}
                 confirming={confirmingBooking}
                 error={error}
+                chargeState={chargeState}
                 onClose={handleClose}
               />
             )}
@@ -1001,7 +1013,7 @@ function InfoItem({ label, value, highlight }) {
   );
 }
 
-function StepResult({ apartment, hotel, searchParams, bookingResult, bookingLocator, paymentCompleted, confirming, error, onClose }) {
+function StepResult({ apartment, hotel, searchParams, bookingResult, bookingLocator, paymentCompleted, confirming, error, chargeState, onClose }) {
   if (confirming && !error && !paymentCompleted) {
     return (
       <div className="text-center py-10" style={{ animation: 'fadeSlideIn 0.5s ease-out' }}>
@@ -1065,14 +1077,45 @@ function StepResult({ apartment, hotel, searchParams, bookingResult, bookingLoca
 
   const errorMsg = error || bookingResult?.data?.mensagem || 'Não foi possível concluir a reserva.';
 
+  // Título e mensagem secundária dependem do estado REAL de cobrança:
+  // - 'charged'  → pagamento cobrado e NÃO estornado: orientar contato com suporte.
+  // - 'refunded' → pagamento cobrado e estornado: informar estorno integral.
+  // - null       → nenhuma cobrança: pode oferecer nova tentativa.
+  const heading = chargeState === 'charged'
+    ? 'Sua reserva não pôde ser confirmada'
+    : chargeState === 'refunded'
+      ? 'Sua reserva não pôde ser confirmada'
+      : 'Não foi possível concluir o pagamento';
+
+  let secondary;
+  if (chargeState === 'charged') {
+    secondary = (
+      <p className="text-xs text-amber-600 font-medium mb-6 max-w-sm mx-auto">
+        Seu pagamento foi cobrado, mas não conseguimos confirmar a reserva. Entre em contato com o suporte informando seu pagamento para regularizar ou solicitar o estorno.
+      </p>
+    );
+  } else if (chargeState === 'refunded') {
+    secondary = (
+      <p className="text-xs text-emerald-600 font-medium mb-6 max-w-sm mx-auto">
+        Seu pagamento será estornado integralmente. Você pode tentar novamente com outro quarto ou outra forma de pagamento.
+      </p>
+    );
+  } else {
+    secondary = (
+      <p className="text-xs text-emerald-600 font-medium mb-6 max-w-sm mx-auto">
+        Sua reserva foi liberada e nenhum valor foi cobrado. Tente novamente com outro quarto ou outra forma de pagamento.
+      </p>
+    );
+  }
+
   return (
     <div className="text-center py-8" style={{ animation: 'fadeSlideIn 0.5s ease-out' }}>
       <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-amber-100">
         <AlertTriangle className="w-8 h-8 text-amber-400" />
       </div>
-      <h3 className="text-base font-bold text-gray-800 mb-1">Não foi possível concluir o pagamento</h3>
+      <h3 className="text-base font-bold text-gray-800 mb-1">{heading}</h3>
       <p className="text-xs text-gray-500 mb-2 max-w-sm mx-auto leading-relaxed">{errorMsg}</p>
-      <p className="text-xs text-emerald-600 font-medium mb-6 max-w-sm mx-auto">Sua reserva foi liberada e nenhum valor foi cobrado. Tente novamente com outro quarto ou outra forma de pagamento.</p>
+      {secondary}
       <button onClick={onClose} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold px-6 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all text-sm">
         Fechar
       </button>
