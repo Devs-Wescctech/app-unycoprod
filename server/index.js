@@ -4242,6 +4242,11 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
     const cancelToken = b.booking_code || b.localizador;
     console.log('[LP BOOKINGS] Cancel using token (booking_code):', cancelToken, 'localizador:', b.localizador);
 
+    if (!COOBMAIS_CANCEL_PASSWORD) {
+      console.log('[LP BOOKINGS] Cancel password not configured');
+      return res.json({ ok: false, error: 'A senha de cancelamento do associado não está configurada. Configure-a na Central de APIs (Coobmais) para permitir cancelamentos.' });
+    }
+
     let bookingCancelOk = false;
     let bookingCancelMsg = '';
     try {
@@ -4252,7 +4257,8 @@ app.patch('/api/lp/bookings/:id/cancel', async (req, res) => {
           'Authorization': `Bearer ${await ensureCoobToken()}`
         },
         body: JSON.stringify({
-          token: cancelToken
+          token: cancelToken,
+          senha: COOBMAIS_CANCEL_PASSWORD
         })
       });
       const cancelText = await cancelRes.text();
@@ -5242,6 +5248,11 @@ app.patch('/api/payments/:id/cancel-booking', async (req, res) => {
       const cancelToken = b.booking_code || b.localizador;
       console.log('[PAYMENTS CANCEL] Cancel using token (booking_code):', cancelToken, 'localizador:', b.localizador);
 
+      if (!COOBMAIS_CANCEL_PASSWORD) {
+        console.log('[PAYMENTS CANCEL] Cancel password not configured');
+        return res.json({ ok: false, error: 'A senha de cancelamento do associado não está configurada. Configure-a na Central de APIs (Coobmais) para permitir cancelamentos.' });
+      }
+
       try {
         const cancelRes = await fetch(`${COOBMAIS_BASE_URL}/Book/CancellationBook`, {
           method: 'PATCH',
@@ -5250,7 +5261,8 @@ app.patch('/api/payments/:id/cancel-booking', async (req, res) => {
             'Authorization': `Bearer ${await ensureCoobToken()}`
           },
           body: JSON.stringify({
-            token: cancelToken
+            token: cancelToken,
+            senha: COOBMAIS_CANCEL_PASSWORD
           })
         });
         const cancelText = await cancelRes.text();
